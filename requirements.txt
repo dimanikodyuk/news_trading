@@ -1,0 +1,27 @@
+# Web
+fastapi>=0.115
+uvicorn[standard]>=0.34
+pydantic>=2.10
+pydantic-settings>=2.7
+
+# Bybit
+pybit>=5.7
+
+# Telegram
+aiogram>=3.17
+
+# Парсинг
+requests>=2.32
+beautifulsoup4>=4.12
+lxml>=5.3
+
+# Scheduler
+apscheduler>=3.11
+
+# DB
+aiosqlite>=0.20
+sqlalchemy>=2.0
+
+# Utils
+python-dateutil>=2.9
+pytz>=2025.1

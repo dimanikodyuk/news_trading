@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>News Trading Bot</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; }
+  .badge-high { background: #dc2626; }
+  .badge-medium { background: #f59e0b; }
+  .badge-low { background: #64748b; }
+  .up { color: #22c55e; }
+  .down { color: #ef4444; }
+  .flat { color: #94a3b8; }
+  .tab { padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; color: #94a3b8; }
+  .tab:hover { background: #334155; color: #fff; }
+  .tab.active { background: #0891b2; color: #fff; }
+  table { width: 100%; font-size: 0.875rem; }
+  thead { color: #94a3b8; border-bottom: 1px solid #334155; }
+  th { text-align: left; padding: 0.5rem; font-weight: 500; }
+  td { padding: 0.5rem; border-bottom: 1px solid #1e293b; }
+  tr:hover { background: rgba(51, 65, 85, 0.5); }
+  .loading { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #334155; border-top-color: #22d3ee; border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Тултіп */
+  .tip {
+    position: relative;
+    border-bottom: 1px dotted #64748b;
+    cursor: help;
+  }
+  .tip:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(100% + 8px);
+    background: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    font-weight: normal;
+    width: max-content;
+    max-width: 320px;
+    white-space: normal;
+    line-height: 1.4;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    pointer-events: none;
+  }
+  .tip:hover::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 100%;
+    border: 5px solid transparent;
+    border-top-color: #475569;
+    z-index: 100;
+  }
+  .hint { font-size: 0.7rem; color: #64748b; margin-top: 0.25rem; line-height: 1.3; }
+  .section-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  details summary { cursor: pointer; user-select: none; }
+  details summary::-webkit-details-marker { display: none; }
+  details[open] summary::before { content: '▼ '; }
+  details:not([open]) summary::before { content: '▶ '; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<nav class="bg-slate-800 border-b border-slate-700 px-6 py-3">
+  <div class="max-w-7xl mx-auto flex items-center gap-6">
+    <a href="#" class="text-xl font-bold text-cyan-400">📊 News Bot</a>
+    <span class="ml-auto text-sm text-slate-500">
+      SOLUSDT · <span id="ws-status" class="text-red-400">● offline</span>
+    </span>
+  </div>
+</nav>
+
+<main class="max-w-7xl mx-auto p-6">
+  <div class="flex gap-2 mb-6">
+    <div class="tab active" data-tab="dashboard">Дашборд</div>
+    <div class="tab" data-tab="events">Події</div>
+    <div class="tab" data-tab="impact">Вплив</div>
+    <div class="tab" data-tab="help">Довідка</div>
+  </div>
+
+  <!-- ==================== DASHBOARD ==================== -->
+  <div id="tab-dashboard">
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Загальна кількість економічних подій у базі даних (всі країни, які пройшли фільтр).">
+          Всього подій
+        </div>
+        <div class="text-3xl font-bold" id="stat-events">—</div>
+        <div class="hint">Подій у БД (high + medium, USD)</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Кількість хвилинних свічок SOLUSDT, завантажених через REST API Bybit + записаних WebSocket-ом у реальному часі.">
+          Свічок у БД
+        </div>
+        <div class="text-3xl font-bold" id="stat-prices">—</div>
+        <div class="hint">1-хвилинні свічки SOLUSDT з Bybit</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Скільки подій уже мають розрахований вплив на ціну SOLUSDT (T+1, T+5, T+15, T+30, T+60 хв).">
+          Розраховано вплив
+        </div>
+        <div class="text-3xl font-bold" id="stat-impact">—</div>
+        <div class="hint">Подій з розрахованим впливом</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Час закриття останньої свічки в базі. Якщо це 'зараз' — WebSocket працює. Якщо стара — щось зупинилось.">
+          Остання свічка (UTC)
+        </div>
+        <div class="text-sm font-mono" id="stat-last">—</div>
+        <div class="hint">Час останнього оновлення ціни</div>
+      </div>
+    </div>
+
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">
+        <span class="tip" data-tip="Ціна закриття SOLUSDT на Bybit spot, 1-хвилинні свічки за останню годину. Оновлюється кожні 30 секунд.">
+          SOLUSDT — останні 60 хвилин
+        </span>
+      </h2>
+      <canvas id="price-chart" height="80"></canvas>
+    </div>
+
+    <div class="card p-4 mb-6" id="overall-impact-card" style="display:none">
+      <h2 class="section-title">
+        <span class="tip" data-tip="Середній рух ціни SOLUSDT після всіх оброблених подій. Показує, чи в середньому новини рухають ринок і в який бік.">
+          Вплив — загальна статистика
+        </span>
+      </h2>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4" id="overall-impact"></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="section-title mb-0">Останні події</h2>
+        <button onclick="runRecompute()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm tip"
+                data-tip="Запустити перерахунок впливу для всіх подій, які вже відбулись, але ще не мають impact.">
+          Перерахувати вплив
+        </button>
+      </div>
+      <table>
+        <thead><tr>
+          <th class="tip" data-tip="Час публікації події в UTC (всесвітній координований час). Київ = UTC+2 або UTC+3.">Час (UTC)</th>
+          <th class="tip" data-tip="Важливість події: high = червона (FOMC, CPI, NFP), medium = помаранчева (виступи, другорядні дані), low = сіра.">Важл.</th>
+          <th class="tip" data-tip="Валюта, до якої належить подія: USD (долар), EUR (євро), GBP (фунт), JPY (єна), AUD (австралійський долар), тощо.">Вал.</th>
+          <th class="tip" data-tip="Назва економічної події. Клік відкриває деталі з розрахунком впливу на SOLUSDT.">Подія</th>
+        </tr></thead>
+        <tbody id="recent-events"><tr><td colspan="4"><span class="loading"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== EVENTS ==================== -->
+  <div id="tab-events" style="display:none">
+    <div class="flex justify-between mb-4">
+      <h1 class="text-2xl font-bold">Події</h1>
+      <div class="flex gap-2">
+        <button class="tab active" onclick="loadEvents(null)">Всі</button>
+        <button class="tab" onclick="loadEvents('high')">High</button>
+        <button class="tab" onclick="loadEvents('medium')">Medium</button>
+      </div>
+    </div>
+    <div class="card p-4">
+      <table>
+        <thead><tr>
+          <th class="tip" data-tip="Унікальний ідентифікатор події в базі даних.">ID</th>
+          <th class="tip" data-tip="Час публікації (UTC).">Час</th>
+          <th class="tip" data-tip="Важливість: high / medium / low.">Важл.</th>
+          <th class="tip" data-tip="Валюта країни-емітента.">Вал.</th>
+          <th class="tip" data-tip="Назва події.">Подія</th>
+          <th class="text-right tip" data-tip="Зміна ціни SOLUSDT через 15 хвилин після події, у відсотках від ціни за 1 хвилину ДО події.">Ret 15хв</th>
+          <th class="text-right tip" data-tip="Зміна ціни SOLUSDT через 60 хвилин після події, у відсотках.">Ret 60хв</th>
+        </tr></thead>
+        <tbody id="events-tbody"><tr><td colspan="7"><span class="loading"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== IMPACT ==================== -->
+  <div id="tab-impact" style="display:none">
+    <h1 class="text-2xl font-bold mb-6">Статистика впливу</h1>
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">
+        <span class="tip" data-tip="Загальна статистика по всіх оброблених подіях.">Загальна</span>
+      </h2>
+      <div id="impact-overall">—</div>
+    </div>
+    <div class="card p-4">
+      <h2 class="section-title">
+        <span class="tip" data-tip="Статистика згрупована за типом події. Показує, які саме події найбільше рухають SOLUSDT.">
+          По типах подій
+        </span>
+      </h2>
+      <table>
+        <thead><tr>
+          <th>Подія</th>
+          <th class="tip" data-tip="Важливість події.">Важл.</th>
+          <th class="text-right tip" data-tip="Кількість оброблених випадків цієї події.">n</th>
+          <th class="text-right tip" data-tip="Середня зміна ціни через 5 хвилин після події.">Avg +5хв</th>
+          <th class="text-right tip" data-tip="Середня зміна ціни через 15 хвилин після події. Ключовий показник — тут зазвичай видно справжній напрям.">Avg +15хв</th>
+          <th class="text-right tip" data-tip="Середня зміна ціни через 30 хвилин.">Avg +30хв</th>
+          <th class="text-right tip" data-tip="Середня зміна ціни через 60 хвилин.">Avg +60хв</th>
+          <th class="text-right tip" data-tip="Скільки разів ціна йшла вгору / вниз / залишалась на місці через 15 хвилин.">Up/Down/Flat</th>
+        </tr></thead>
+        <tbody id="impact-tbody"><tr><td colspan="8"><span class="loading"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== HELP ==================== -->
+  <div id="tab-help" style="display:none">
+    <h1 class="text-2xl font-bold mb-6">Довідка</h1>
+
+    <div class="card p-6 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Що це за проєкт</h2>
+      <p class="text-slate-300 leading-relaxed">
+        Система моніторить економічні новини (ForexFactory), записує ціни <b>SOLUSDT</b> з Bybit у реальному часі
+        та розраховує <b>вплив</b> кожної новини на ціну. Мета — знайти статистичні закономірності:
+        чи реагують крипто-ринки на конкретні події передбачувано.
+      </p>
+    </div>
+
+    <div class="card p-6 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Основні терміни</h2>
+      <dl class="space-y-3 text-sm">
+        <div>
+          <dt class="font-semibold text-white">Подія (Event)</dt>
+          <dd class="text-slate-300 ml-4">Запланована публікація економічних даних (CPI, NFP, FOMC rate decision) або виступ чиновника ФРС/ЄЦБ. Має точний час публікації в UTC.</dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Важливість (Importance)</dt>
+          <dd class="text-slate-300 ml-4">
+            <span class="badge-high px-2 py-0.5 rounded text-xs">high</span> — найважливіші події: FOMC rate, CPI, NFP, GDP.<br>
+            <span class="badge-medium px-2 py-0.5 rounded text-xs">medium</span> — виступи членів FOMC, PPI, retail sales.<br>
+            <span class="badge-low px-2 py-0.5 rounded text-xs">low</span> — другорядні дані.
+          </dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Baseline (T-1)</dt>
+          <dd class="text-slate-300 ml-4">Ціна SOLUSDT за 1 хвилину ДО події. Від неї рахуються всі зміни.</dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Вікна T+N хв</dt>
+          <dd class="text-slate-300 ml-4">Час після події, на якому міряємо ціну. Використовуємо T+1, T+5, T+15, T+30, T+60 хвилин.</dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Ret N хв (%)</dt>
+          <dd class="text-slate-300 ml-4">Зміна ціни через N хвилин після події, у відсотках від baseline. Формула: <code class="bg-slate-700 px-1 rounded">(price_tN − baseline) / baseline × 100</code>.</dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Напрямок (Direction)</dt>
+          <dd class="text-slate-300 ml-4">
+            <span class="up">up</span> — ціна виросла більше ніж на поріг,<br>
+            <span class="down">down</span> — впала більше ніж на поріг,<br>
+            <span class="flat">flat</span> — зміна в межах порогу (незначуща).
+          </dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Поріг (Threshold)</dt>
+          <dd class="text-slate-300 ml-4">Динамічний поріг = <code class="bg-slate-700 px-1 rounded">max(0.1%, 2 × медіанна волатильність за 24 год)</code>. Адаптується до поточної волатильності SOL.</dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Avg +15хв</dt>
+          <dd class="text-slate-300 ml-4">Середня зміна ціни через 15 хвилин після всіх подій цього типу. Якщо вона стабільно > 0 — новина в середньому штовхає SOL вгору.</dd>
+        </div>
+        <div>
+          <dt class="font-semibold text-white">Up/Down/Flat</dt>
+          <dd class="text-slate-300 ml-4">Розподіл напрямків. Наприклад, 3/2/5 означає: у 3 випадках ціна пішла вгору, у 2 — вниз, у 5 — залишилась на місці.</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="card p-6 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Як читати статистику</h2>
+      <ul class="text-sm text-slate-300 space-y-2 list-disc list-inside">
+        <li>Якщо <b>n &lt; 10</b> — статистика ненадійна, це випадковість.</li>
+        <li>Якщо <b>n ≥ 20-30</b> і <code class="bg-slate-700 px-1 rounded">Avg +15хв</code> стабільно одного знаку — можна говорити про патерн.</li>
+        <li>Якщо <b>Up/Down/Flat ≈ 33/33/33</b> — новина НЕ має передбачуваного впливу.</li>
+        <li>Якщо <b>Avg +1хв великий, але Avg +15хв ≈ 0</b> — це шпилька (spike), заробити на ній неможливо.</li>
+        <li>Якщо <b>Avg +15хв і Avg +60хв одного знаку, і +60хв більший</b> — це тренд, можна торгувати.</li>
+      </ul>
+    </div>
+
+    <div class="card p-6">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Джерела даних</h2>
+      <ul class="text-sm text-slate-300 space-y-2">
+        <li><b>Новини:</b> ForexFactory (парсинг HTML, безкоштовно).</li>
+        <li><b>Ціни:</b> Bybit Spot API (WebSocket + REST для історії).</li>
+        <li><b>Символ:</b> SOLUSDT.</li>
+        <li><b>Комісії Bybit spot:</b> Maker 0.1%, Taker 0.1% (для майбутнього paper trading).</li>
+      </ul>
+    </div>
+  </div>
+</main>
+
+<div id="modal" style="display:none" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+  <div class="card p-6 max-w-2xl w-full max-h-[90vh] overflow-auto">
+    <div class="flex justify-between mb-4">
+      <h2 id="modal-title" class="text-xl font-bold"></h2>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ==================== TABS ====================
+document.querySelectorAll('.tab[data-tab]').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    ['dashboard','events','impact','help'].forEach(name => {
+      document.getElementById('tab-' + name).style.display = name === t.dataset.tab ? '' : 'none';
+    });
+    if (t.dataset.tab === 'events') loadEvents();
+    if (t.dataset.tab === 'impact') loadImpact();
+  };
+});
+
+// ==================== HELPERS ====================
+const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(3) + '%';
+const clsFor = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+const clsForDir = d => d === 'up' ? 'up' : d === 'down' ? 'down' : 'flat';
+const badge = imp => `<span class="badge-${imp} px-2 py-0.5 rounded text-xs">${imp}</span>`;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+// ==================== DASHBOARD ====================
+let priceChart = null;
+
+async function loadDashboard() {
+  const stats = await api('/api/stats');
+  document.getElementById('stat-events').textContent = stats.events_count;
+  document.getElementById('stat-prices').textContent = stats.prices_count.toLocaleString();
+  document.getElementById('stat-impact').textContent = stats.impact_count;
+  document.getElementById('stat-last').textContent = stats.last_ts || '—';
+
+  const events = await api('/events?limit=10');
+  const tbody = document.getElementById('recent-events');
+  tbody.innerHTML = events.map(e => `
+    <tr class="cursor-pointer" onclick="openEvent(${e.id})">
+      <td class="font-mono text-xs">${e.time_utc.slice(0,16)}</td>
+      <td>${badge(e.importance)}</td>
+      <td class="font-mono">${e.country}</td>
+      <td class="text-cyan-400">${e.title}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="text-slate-500">Немає подій</td></tr>';
+
+  const prices = await api('/prices/latest?limit=60');
+  const sorted = prices.slice().reverse();
+  const labels = sorted.map(d => new Date(d.ts).toLocaleTimeString('uk-UA', { hour12: false }));
+  const data = sorted.map(d => d.close);
+
+  if (priceChart) priceChart.destroy();
+  priceChart = new Chart(document.getElementById('price-chart'), {
+    type: 'line',
+    data: { labels, datasets: [{
+      label: 'SOLUSDT (ціна закриття, USD)', data,
+      borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)',
+      borderWidth: 2, tension: 0.2, pointRadius: 0, fill: true,
+    }]},
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#e2e8f0' } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `Ціна: $${ctx.parsed.y.toFixed(4)}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
+             title: { display: true, text: 'Час (UTC)', color: '#94a3b8' } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
+             title: { display: true, text: 'Ціна, USD', color: '#94a3b8' } },
+      }
+    }
+  });
+
+  const istats = await api('/impact/stats');
+  if (istats.overall && istats.overall.n) {
+    document.getElementById('overall-impact-card').style.display = '';
+    const o = istats.overall;
+    document.getElementById('overall-impact').innerHTML = `
+      ${metric('Avg +5хв', fmtPct(o.avg_5m), clsFor(o.avg_5m),
+              'Середня зміна ціни через 5 хвилин після події')}
+      ${metric('Avg +15хв', fmtPct(o.avg_15m), clsFor(o.avg_15m),
+              'Середня зміна ціни через 15 хвилин. Ключовий показник — тут видно справжній напрям, а не шпильку.')}
+      ${metric('Avg +30хв', fmtPct(o.avg_30m), clsFor(o.avg_30m),
+              'Середня зміна ціни через 30 хвилин')}
+      ${metric('Avg +60хв', fmtPct(o.avg_60m), clsFor(o.avg_60m),
+              'Середня зміна ціни через 60 хвилин. Якщо знак збігається з +15хв і значення більше — це тренд.')}
+      ${metric('Up/Down/Flat (n=' + o.n + ')',
+        `<span class="up">${o.up_15m||0}</span> / <span class="down">${o.down_15m||0}</span> / <span class="flat">${o.flat_15m||0}</span>`, '',
+        'Скільки разів ціна йшла вгору/вниз/залишалась на місці через 15 хвилин. n — загальна кількість подій.')}
+    `;
+  }
+}
+
+function metric(label, value, cls, tip) {
+  return `<div>
+    <div class="text-sm text-slate-400 tip" data-tip="${tip}">${label}</div>
+    <div class="text-xl font-mono ${cls}">${value}</div>
+  </div>`;
+}
+
+// ==================== EVENTS ====================
+async function loadEvents(importance = null) {
+  const events = await api('/events?limit=500');
+  const filtered = importance ? events.filter(e => e.importance === importance) : events;
+  const tbody = document.getElementById('events-tbody');
+  tbody.innerHTML = filtered.map(e => `
+    <tr class="cursor-pointer" onclick="openEvent(${e.id})">
+      <td class="font-mono text-xs text-slate-500">${e.id}</td>
+      <td class="font-mono text-xs">${e.time_utc.slice(0,16)}</td>
+      <td>${badge(e.importance)}</td>
+      <td class="font-mono">${e.country}</td>
+      <td class="text-cyan-400">${e.title}</td>
+      <td class="text-right font-mono ${clsForDir(e.dir_15m)}">
+        ${e.ret_15m != null ? fmtPct(e.ret_15m) : '—'}
+      </td>
+      <td class="text-right font-mono ${clsForDir(e.dir_60m)}">
+        ${e.ret_60m != null ? fmtPct(e.ret_60m) : '—'}
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="text-slate-500">Немає подій</td></tr>';
+}
+
+// ==================== IMPACT ====================
+async function loadImpact() {
+  const s = await api('/impact/stats');
+  const o = s.overall || {};
+  document.getElementById('impact-overall').innerHTML = o.n ? `
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+      ${metric('Всього подій (n)', o.n, '', 'Загальна кількість подій з розрахованим впливом')}
+      ${metric('Avg +1хв', fmtPct(o.avg_1m), clsFor(o.avg_1m), 'Середня зміна через 1 хвилину — це "шпилька"')}
+      ${metric('Avg +5хв', fmtPct(o.avg_5m), clsFor(o.avg_5m), 'Середня зміна через 5 хвилин')}
+      ${metric('Avg +15хв', fmtPct(o.avg_15m), clsFor(o.avg_15m), 'Середня зміна через 15 хвилин')}
+      ${metric('Avg +30хв', fmtPct(o.avg_30m), clsFor(o.avg_30m), 'Середня зміна через 30 хвилин')}
+      ${metric('Avg +60хв', fmtPct(o.avg_60m), clsFor(o.avg_60m), 'Середня зміна через 60 хвилин')}
+    </div>
+  ` : '<p class="text-slate-500">Немає даних</p>';
+
+  const tbody = document.getElementById('impact-tbody');
+  tbody.innerHTML = (s.by_title || []).map(r => `
+    <tr>
+      <td>${r.title}</td>
+      <td>${badge(r.importance)}</td>
+      <td class="text-right font-mono">${r.n}</td>
+      <td class="text-right font-mono ${clsFor(r.avg_5m)}">${fmtPct(r.avg_5m)}</td>
+      <td class="text-right font-mono ${clsFor(r.avg_15m)}">${fmtPct(r.avg_15m)}</td>
+      <td class="text-right font-mono ${clsFor(r.avg_30m)}">${fmtPct(r.avg_30m)}</td>
+      <td class="text-right font-mono ${clsFor(r.avg_60m)}">${fmtPct(r.avg_60m)}</td>
+      <td class="text-right font-mono text-xs">
+        <span class="up">${r.up_15m||0}</span>/<span class="down">${r.down_15m||0}</span>/<span class="flat">${r.flat_15m||0}</span>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="8" class="text-slate-500">Немає даних</td></tr>';
+}
+
+// ==================== EVENT MODAL ====================
+async function openEvent(id) {
+  const e = await api(`/event/${id}`);
+  const i = await api(`/impact/event/${id}`).catch(() => null);
+
+  document.getElementById('modal-title').textContent = e.title;
+  let body = `
+    <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+      <div><span class="text-slate-400 tip" data-tip="Час публікації в UTC">Час:</span> <span class="font-mono">${e.time_utc}</span></div>
+      <div><span class="text-slate-400">Валюта:</span> <span class="font-mono">${e.country}</span></div>
+      <div><span class="text-slate-400">Важливість:</span> ${badge(e.importance)}</div>
+      <div><span class="text-slate-400 tip" data-tip="Прогноз / попереднє / фактичне значення економічного показника">Forecast/Prev/Actual:</span> ${e.forecast_value||'—'} / ${e.previous_value||'—'} / ${e.actual_value||'—'}</div>
+    </div>
+  `;
+
+  if (i && !i.error) {
+    body += `<h3 class="font-semibold mb-2">Вплив на SOLUSDT</h3>
+      <div class="text-xs text-slate-400 mb-2">
+        Baseline (T-1): <span class="font-mono text-white">$${i.price_baseline ? i.price_baseline.toFixed(4) : '—'}</span>
+        · Поріг: <span class="font-mono text-white">${i.threshold_pct ? i.threshold_pct.toFixed(3) : '—'}%</span>
+      </div>
+      <table><thead><tr>
+        <th class="tip" data-tip="Вікно після події">Вікно</th>
+        <th class="text-right tip" data-tip="Ціна закриття свічки в цей момент">Ціна</th>
+        <th class="text-right tip" data-tip="Зміна у % від baseline (T-1)">Зміна</th>
+        <th class="text-right tip" data-tip="Напрямок: up / down / flat">Напрямок</th>
+      </tr></thead><tbody>`;
+    for (const w of [1,5,15,30,60]) {
+      body += `<tr>
+        <td>T+${w}хв</td>
+        <td class="text-right font-mono">${i['price_t'+w] ? '$'+i['price_t'+w].toFixed(4) : '—'}</td>
+        <td class="text-right font-mono ${clsFor(i['ret_'+w+'m'])}">${fmtPct(i['ret_'+w+'m'])}</td>
+        <td class="text-right ${clsForDir(i['dir_'+w+'m'])}">${i['dir_'+w+'m'] || '—'}</td>
+      </tr>`;
+    }
+    body += `</tbody></table>`;
+  } else {
+    body += `<p class="text-slate-400">Вплив ще не розраховано. Натисни "Перерахувати вплив" на дашборді.</p>`;
+  }
+
+  document.getElementById('modal-body').innerHTML = body;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('modal').style.display = 'none';
+}
+document.getElementById('modal').onclick = e => {
+  if (e.target.id === 'modal') closeModal();
+};
+
+// ==================== ACTIONS ====================
+async function runRecompute() {
+  if (!confirm('Перерахувати вплив для всіх минулих подій?')) return;
+  const r = await api('/impact/recompute', { method: 'POST' });
+  alert(`Готово: ${JSON.stringify(r)}`);
+  loadDashboard();
+}
+
+// ==================== WEBSOCKET ====================
+(function connectWS() {
+  const status = document.getElementById('ws-status');
+  let ws, delay = 1000;
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws.onopen = () => {
+      status.textContent = '● online';
+      status.className = 'text-green-400';
+      delay = 1000;
+    };
+    ws.onclose = () => {
+      status.textContent = '● offline';
+      status.className = 'text-red-400';
+      setTimeout(connect, delay);
+      delay = Math.min(delay * 2, 30000);
+    };
+    ws.onerror = () => ws.close();
+    ws.onmessage = e => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'calendar_refreshed') loadDashboard();
+        if (msg.type === 'impact_recomputed') loadDashboard();
+      } catch (_) {}
+    };
+  }
+  connect();
+})();
+
+// ==================== INIT ====================
+loadDashboard();
+setInterval(() => {
+  const active = document.querySelector('.tab.active');
+  if (active && active.dataset.tab === 'dashboard') loadDashboard();
+}, 30000);
+</script>
+</body>
+</html>
