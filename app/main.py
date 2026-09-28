@@ -1,5 +1,5 @@
 """
-FastAPI-додаток: API для подій, цін, impact, WebSocket для веб-панелі.
+FastAPI-додаток: API для подій, цін, impact, LIVE-стрічки, WebSocket.
 
 Scheduler:
   - refresh_calendar (day=today) — кожні 6 годин
@@ -26,9 +26,9 @@ from app.calendar.parser import fetch_events
 from app.prices.bybit_ws import run_ws
 from app.prices.history import load_history_sync
 from app.impact.batch import process_all_past_events
+from app.impact.stats import get_stats, get_heatmap, get_cross_asset_detail
 from app.bot.notifier import notify_impact
 
-from app.impact.stats import get_stats, get_heatmap, get_cross_asset_detail
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -68,6 +68,22 @@ manager = ConnectionManager()
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _iso_to_ms(iso_str: str | None) -> int | None:
+    if not iso_str:
+        return None
+    try:
+        s = iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Background jobs
 # ---------------------------------------------------------------------------
 async def refresh_calendar(day: str = "today"):
@@ -101,9 +117,7 @@ async def refresh_calendar(day: str = "today"):
 
 
 async def recompute_impact_job():
-    """Перераховує impact і надсилає сповіщення про нові результати."""
     try:
-        # Список подій без impact (щоб знати, кому слати сповіщення)
         async with get_db() as db:
             cur = await db.execute("""
                 SELECT e.id FROM events e
@@ -121,11 +135,23 @@ async def recompute_impact_job():
             logger.info(f"Impact recompute: {stats}")
             await manager.broadcast({"type": "impact_recomputed", **stats})
 
-            # Сповіщення для нових
             for eid in pending:
                 await notify_impact(eid)
     except Exception as ex:
         logger.exception(f"Impact recompute failed: {ex}")
+
+
+async def live_broadcast_loop():
+    """Кожні 2 сек надсилає активним WS-клієнтам оновлення live-карток."""
+    while True:
+        try:
+            if manager.active:
+                data = await _build_live_current()
+                if data["active"]:
+                    await manager.broadcast({"type": "live_update", "data": data})
+        except Exception as ex:
+            logger.debug(f"live_broadcast_loop error: {ex}")
+        await asyncio.sleep(2)
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +192,7 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(run_ws())
     asyncio.create_task(recompute_impact_job())
+    asyncio.create_task(live_broadcast_loop())
 
     yield
     scheduler.shutdown()
@@ -184,16 +211,9 @@ STATIC_DIR.mkdir(exist_ok=True)
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
-@app.get("/impact/heatmap")
-async def api_impact_heatmap(importance: str | None = None):
-    return await get_heatmap(importance=importance)
-
-@app.get("/impact/cross_asset/{event_id}")
-async def api_impact_cross_asset(event_id: int):
-    return await get_cross_asset_detail(event_id)
 
 # ============================================================================
-# API
+# API: stats / events / prices
 # ============================================================================
 @app.get("/health")
 async def health():
@@ -241,7 +261,7 @@ async def api_events(limit: int = 50):
                    ei.ret_15m, ei.ret_60m, ei.dir_15m, ei.dir_60m,
                    ei.expected_dir, ei.hit
             FROM events e
-            LEFT JOIN event_impact ei ON ei.event_id = e.id
+            LEFT JOIN event_impact ei ON ei.event_id = e.id AND ei.symbol = 'SOLUSDT'
             ORDER BY e.time_utc DESC
             LIMIT ?
         """, (limit,))
@@ -270,7 +290,6 @@ async def api_prices(limit: int = 100):
 
 @app.get("/prices/range")
 async def api_prices_range(hours: int = 24, symbol: str | None = None):
-    """Свічки за останні N годин + події в цьому вікні."""
     sym = symbol or settings.bybit_symbol
     now_ms = int(_time.time() * 1000)
     from_ms = now_ms - hours * 60 * 60 * 1000
@@ -292,7 +311,7 @@ async def api_prices_range(hours: int = 24, symbol: str | None = None):
             SELECT e.id, e.title, e.country, e.importance, e.time_utc,
                    ei.hit, ei.ret_15m, ei.dir_15m, ei.expected_dir
             FROM events e
-            LEFT JOIN event_impact ei ON ei.event_id = e.id
+            LEFT JOIN event_impact ei ON ei.event_id = e.id AND ei.symbol = 'SOLUSDT'
             WHERE e.time_utc >= ?
             ORDER BY e.time_utc ASC
         """, (from_iso,))
@@ -301,6 +320,9 @@ async def api_prices_range(hours: int = 24, symbol: str | None = None):
     return {"symbol": sym, "hours": hours, "candles": candles, "events": events}
 
 
+# ============================================================================
+# API: impact
+# ============================================================================
 @app.post("/impact/recompute")
 async def api_impact_recompute(limit: int = 500):
     return await process_all_past_events(limit=limit)
@@ -315,17 +337,108 @@ async def api_impact_stats(symbol: str | None = None,
 
 @app.get("/impact/event/{event_id}")
 async def api_impact_event(event_id: int):
+    """Повертає impact для SOL за замовчуванням (зворотна сумісність)."""
     async with get_db() as db:
         cur = await db.execute("""
             SELECT ei.*, e.title, e.country, e.time_utc
             FROM event_impact ei
             JOIN events e ON e.id = ei.event_id
-            WHERE ei.event_id = ?
+            WHERE ei.event_id = ? AND ei.symbol = 'SOLUSDT'
         """, (event_id,))
         row = await cur.fetchone()
     return dict(row) if row else {"error": "not found"}
 
 
+@app.get("/impact/heatmap")
+async def api_impact_heatmap(importance: str | None = None):
+    return await get_heatmap(importance=importance)
+
+
+@app.get("/impact/cross_asset/{event_id}")
+async def api_impact_cross_asset(event_id: int):
+    return await get_cross_asset_detail(event_id)
+
+
+# ============================================================================
+# API: LIVE
+# ============================================================================
+async def _build_live_current() -> dict:
+    """Повертає активні події (±2 хв від now) з поточними цінами."""
+    now_ms = int(_time.time() * 1000)
+    window_ms = 2 * 60 * 1000
+
+    lo_iso = datetime.fromtimestamp((now_ms - window_ms) / 1000, tz=timezone.utc).isoformat()
+    hi_iso = datetime.fromtimestamp((now_ms + window_ms) / 1000, tz=timezone.utc).isoformat()
+
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT id, title, country, importance, time_utc,
+                   forecast_value, previous_value, actual_value
+            FROM events
+            WHERE time_utc BETWEEN ? AND ?
+              AND importance IN ('high', 'medium')
+            ORDER BY time_utc ASC
+        """, (lo_iso, hi_iso))
+        events = [dict(r) for r in await cur.fetchall()]
+
+        result = []
+        for ev in events:
+            ev_ts = _iso_to_ms(ev["time_utc"])
+            if ev_ts is None:
+                continue
+
+            baseline_ts = ev_ts - 60_000
+            symbols_data = {}
+
+            for sym in ["SOLUSDT", "BTCUSDT", "ETHUSDT"]:
+                # Baseline
+                cur = await db.execute("""
+                    SELECT close FROM prices
+                    WHERE symbol = ? AND interval = '1' AND confirm = 1
+                      AND ts BETWEEN ? AND ?
+                    ORDER BY ABS(ts - ?) ASC LIMIT 1
+                """, (sym, baseline_ts - 60_000, baseline_ts + 60_000, baseline_ts))
+                row = await cur.fetchone()
+                baseline = float(row["close"]) if row else None
+
+                # Остання свічка
+                cur = await db.execute("""
+                    SELECT ts, close FROM prices
+                    WHERE symbol = ? AND interval = '1'
+                    ORDER BY ts DESC LIMIT 1
+                """, (sym,))
+                row = await cur.fetchone()
+
+                if baseline and row:
+                    current = float(row["close"])
+                    ret_pct = (current - baseline) / baseline * 100.0
+                    symbols_data[sym] = {
+                        "baseline": baseline,
+                        "current": current,
+                        "current_ts": row["ts"],
+                        "ret_pct": ret_pct,
+                    }
+                else:
+                    symbols_data[sym] = None
+
+            result.append({
+                "event": ev,
+                "seconds_since": max(0, int((now_ms - ev_ts) / 1000)),
+                "seconds_to": max(0, int((ev_ts - now_ms) / 1000)),
+                "symbols": symbols_data,
+            })
+
+    return {"now_ms": now_ms, "active": result}
+
+
+@app.get("/live/current")
+async def api_live_current():
+    return await _build_live_current()
+
+
+# ============================================================================
+# API: history loading (опційно)
+# ============================================================================
 @app.post("/events/load_history")
 async def api_events_load_history(week: str = "last", include_this_week: bool = True):
     total_inserted = 0
