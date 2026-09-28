@@ -10,17 +10,25 @@ class Settings(BaseSettings):
         str_strip_whitespace=True,
     )
 
+    # Bybit
     bybit_symbol: str = "SOLUSDT"
     bybit_kline_interval: int = 1
+
+    # Telegram
     tg_bot_token: str = ""
+    tg_chat_id: int = 0
+
+    # Calendar
     calendar_importance: list[str] = ["high", "medium"]
     calendar_currencies: list[str] = ["USD"]
     calendar_refresh_hours: int = 6
+
+    # DB
     db_path: str = "data/calendar.sqlite"
 
     # Web
-    host: str = "127.0.0.1"
-    port: int = 5085   # ← БУЛО 8000
+    host: str = "0.0.0.0"
+    port: int = 5085
 
     @field_validator("tg_bot_token")
     @classmethod

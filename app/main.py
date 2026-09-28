@@ -3,14 +3,16 @@ FastAPI-додаток: API для подій, цін, impact, WebSocket для 
 
 Scheduler:
   - refresh_calendar (day=today) — кожні 6 годин
-  - refresh_calendar (day=today) — о 00:01 UTC щодня (підхоплення нового дня)
-  - load_history_sync — кожні 24 години (довантаження свічок)
-  - recompute_impact_job — кожні 30 хвилин (перерахунок impact)
+  - refresh_calendar (day=today) — о 00:01 UTC щодня
+  - load_history_sync — кожні 24 години
+  - recompute_impact_job — кожні 30 хвилин
 """
 
 import asyncio
 import logging
+import time as _time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -25,6 +27,7 @@ from app.prices.bybit_ws import run_ws
 from app.prices.history import load_history_sync
 from app.impact.batch import process_all_past_events
 from app.impact.stats import get_stats
+from app.bot.notifier import notify_impact
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,12 +71,9 @@ manager = ConnectionManager()
 # Background jobs
 # ---------------------------------------------------------------------------
 async def refresh_calendar(day: str = "today"):
-    """Парсить ForexFactory (day=today) і додає нові події в БД."""
     logger.info(f"Refreshing economic calendar (day={day})...")
     try:
         events = fetch_events(day=day)
-
-        # Фільтр по важливості та валютах
         events = [e for e in events if e["importance"] in settings.calendar_importance]
         if settings.calendar_currencies:
             events = [e for e in events if e["country"] in settings.calendar_currencies]
@@ -101,12 +101,29 @@ async def refresh_calendar(day: str = "today"):
 
 
 async def recompute_impact_job():
-    """Перераховує impact для всіх минулих подій, що ще не мають даних."""
+    """Перераховує impact і надсилає сповіщення про нові результати."""
     try:
+        # Список подій без impact (щоб знати, кому слати сповіщення)
+        async with get_db() as db:
+            cur = await db.execute("""
+                SELECT e.id FROM events e
+                LEFT JOIN event_impact ei ON ei.event_id = e.id
+                WHERE e.time_utc < datetime('now')
+                  AND e.importance IN ('high', 'medium')
+                  AND (ei.id IS NULL OR ei.hit IS NULL)
+                ORDER BY e.time_utc DESC
+                LIMIT 50
+            """)
+            pending = [r["id"] for r in await cur.fetchall()]
+
         stats = await process_all_past_events(limit=1000)
         if stats["saved"] > 0 or stats["processed"] > 0:
             logger.info(f"Impact recompute: {stats}")
             await manager.broadcast({"type": "impact_recomputed", **stats})
+
+            # Сповіщення для нових
+            for eid in pending:
+                await notify_impact(eid)
     except Exception as ex:
         logger.exception(f"Impact recompute failed: {ex}")
 
@@ -116,39 +133,30 @@ async def recompute_impact_job():
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. БД
     await init_db()
-
-    # 2. Одразу парсимо календар
     await refresh_calendar(day="today")
 
-    # 3. Довантажуємо свічки за останні 2 дні (закриває пропуски WebSocket)
     try:
         await asyncio.to_thread(load_history_sync, 2, "1")
     except Exception as ex:
         logger.exception(f"Initial history load failed: {ex}")
 
-    # 4. Scheduler jobs
-    # 4a. Календар — кожні 6 годин
     scheduler.add_job(
         refresh_calendar, "interval",
         hours=settings.calendar_refresh_hours,
         id="calendar_interval",
         kwargs={"day": "today"},
     )
-    # 4b. Календар — о 00:01 UTC щодня (підхоплення нового дня)
     scheduler.add_job(
         refresh_calendar, CronTrigger(hour=0, minute=1),
         id="calendar_daily",
         kwargs={"day": "today"},
     )
-    # 4c. Свічки — кожні 24 години
     scheduler.add_job(
         load_history_sync, "interval",
         hours=24, id="history_daily",
         kwargs={"days": 2, "interval": "1"},
     )
-    # 4d. Impact — кожні 30 хвилин
     scheduler.add_job(
         recompute_impact_job, "interval",
         minutes=30, id="impact_recompute_auto",
@@ -156,27 +164,22 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info(f"Scheduler started. Jobs: {[j.id for j in scheduler.get_jobs()]}")
 
-    # 5. WebSocket Bybit — у фоні
     asyncio.create_task(run_ws())
-
-    # 6. Одразу рахуємо impact (для тих, що вже минули)
     asyncio.create_task(recompute_impact_job())
 
     yield
-
     scheduler.shutdown()
 
 
 app = FastAPI(title="News Trading Bot", lifespan=lifespan)
 
-
-# ============================================================================
-# HTML
-# ============================================================================
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 
 
+# ============================================================================
+# HTML
+# ============================================================================
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
@@ -192,7 +195,6 @@ async def health():
 
 @app.get("/api/stats")
 async def api_stats():
-    """Загальні метрики для дашборду."""
     async with get_db() as db:
         cur = await db.execute("SELECT COUNT(*) AS n FROM events")
         events_count = (await cur.fetchone())["n"]
@@ -211,7 +213,6 @@ async def api_stats():
 
     last_ts_str = None
     if last_ts:
-        from datetime import datetime, timezone
         last_ts_str = datetime.fromtimestamp(
             last_ts / 1000, tz=timezone.utc
         ).strftime("%Y-%m-%d %H:%M UTC")
@@ -260,6 +261,39 @@ async def api_prices(limit: int = 100):
     return [dict(r) for r in rows]
 
 
+@app.get("/prices/range")
+async def api_prices_range(hours: int = 24, symbol: str | None = None):
+    """Свічки за останні N годин + події в цьому вікні."""
+    sym = symbol or settings.bybit_symbol
+    now_ms = int(_time.time() * 1000)
+    from_ms = now_ms - hours * 60 * 60 * 1000
+
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT ts, open, high, low, close, volume
+            FROM prices
+            WHERE symbol = ? AND ts >= ?
+            ORDER BY ts ASC
+        """, (sym, from_ms))
+        candles = [dict(r) for r in await cur.fetchall()]
+
+        from_iso = datetime.fromtimestamp(
+            from_ms / 1000, tz=timezone.utc
+        ).isoformat()
+
+        cur = await db.execute("""
+            SELECT e.id, e.title, e.country, e.importance, e.time_utc,
+                   ei.hit, ei.ret_15m, ei.dir_15m, ei.expected_dir
+            FROM events e
+            LEFT JOIN event_impact ei ON ei.event_id = e.id
+            WHERE e.time_utc >= ?
+            ORDER BY e.time_utc ASC
+        """, (from_iso,))
+        events = [dict(r) for r in await cur.fetchall()]
+
+    return {"symbol": sym, "hours": hours, "candles": candles, "events": events}
+
+
 @app.post("/impact/recompute")
 async def api_impact_recompute(limit: int = 500):
     return await process_all_past_events(limit=limit)
@@ -287,7 +321,6 @@ async def api_impact_event(event_id: int):
 
 @app.post("/events/load_history")
 async def api_events_load_history(week: str = "last", include_this_week: bool = True):
-    """Завантажує події з ForexFactory за вказаний тиждень (необов'язковий endpoint)."""
     total_inserted = 0
     weeks = [week]
     if include_this_week and week != "this":
@@ -325,7 +358,7 @@ async def api_events_load_history(week: str = "last", include_this_week: bool = 
 
 
 # ============================================================================
-# WebSocket для веб-панелі
+# WebSocket
 # ============================================================================
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
