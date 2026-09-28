@@ -1,13 +1,20 @@
+"""
+Ініціалізація та міграції БД.
+"""
+
 import aiosqlite
-import os
+import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
+
 from app.config import settings
 
-# --- НОВЕ: гарантуємо, що папка під БД існує ---
+logger = logging.getLogger(__name__)
+
+
 def _ensure_db_dir():
-    db_file = Path(settings.db_path)
-    db_file.parent.mkdir(parents=True, exist_ok=True)
+    Path(settings.db_path_abs).parent.mkdir(parents=True, exist_ok=True)
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -41,51 +48,64 @@ CREATE TABLE IF NOT EXISTS event_impact (
     symbol TEXT NOT NULL,
     importance TEXT,
 
-    -- Ціни (close свічки)
-    price_baseline REAL,   -- T-1
-    price_t1 REAL,
-    price_t5 REAL,
-    price_t15 REAL,
-    price_t30 REAL,
-    price_t60 REAL,
+    -- Ціни
+    price_baseline REAL,
+    price_t1 REAL, price_t5 REAL, price_t15 REAL, price_t30 REAL, price_t60 REAL,
 
-    -- % зміни відносно baseline
-    ret_1m REAL,
-    ret_5m REAL,
-    ret_15m REAL,
-    ret_30m REAL,
-    ret_60m REAL,
+    -- % зміни
+    ret_1m REAL, ret_5m REAL, ret_15m REAL, ret_30m REAL, ret_60m REAL,
 
     -- Напрямок (up/down/flat)
-    dir_1m TEXT,
-    dir_5m TEXT,
-    dir_15m TEXT,
-    dir_30m TEXT,
-    dir_60m TEXT,
+    dir_1m TEXT, dir_5m TEXT, dir_15m TEXT, dir_30m TEXT, dir_60m TEXT,
 
-    -- Поріг (для трасування)
+    -- Очікування та влучання
+    expected_dir TEXT,   -- up/down/flat/None
+    hit TEXT,            -- HIT/MISS/NEUTRAL/N/A
+
     threshold_pct REAL,
-
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(event_id, symbol)
 );
 
+CREATE INDEX IF NOT EXISTS idx_events_time ON events(time_utc);
+CREATE INDEX IF NOT EXISTS idx_prices_ts ON prices(symbol, ts);
 CREATE INDEX IF NOT EXISTS idx_impact_event ON event_impact(event_id);
-CREATE INDEX IF NOT EXISTS idx_impact_symbol ON event_impact(symbol);
+CREATE INDEX IF NOT EXISTS idx_impact_hit ON event_impact(hit);
 """
+
 
 @asynccontextmanager
 async def get_db():
-    _ensure_db_dir()  # <-- ключовий рядок
-    db = await aiosqlite.connect(settings.db_path)
+    _ensure_db_dir()
+    db = await aiosqlite.connect(settings.db_path_abs)
     db.row_factory = aiosqlite.Row
     try:
         yield db
     finally:
         await db.close()
 
+
 async def init_db():
     _ensure_db_dir()
     async with get_db() as db:
         await db.executescript(SCHEMA)
         await db.commit()
+
+        # --- Міграції для існуючих БД ---
+        await _migrate(db)
+
+
+async def _migrate(db: aiosqlite.Connection):
+    """Додає нові колонки у вже існуючі таблиці (ідемпотентно)."""
+
+    async def add_col(table: str, col: str, coltype: str):
+        try:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+            await db.commit()
+            logger.info(f"Міграція: додано {table}.{col}")
+        except Exception:
+            # Колонка вже є — нормально
+            pass
+
+    await add_col("event_impact", "expected_dir", "TEXT")
+    await add_col("event_impact", "hit", "TEXT")

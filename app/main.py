@@ -178,7 +178,8 @@ async def api_events(limit: int = 50):
         cur = await db.execute("""
             SELECT e.id, e.title, e.country, e.importance, e.time_utc,
                    e.forecast_value, e.previous_value, e.actual_value,
-                   ei.ret_15m, ei.ret_60m, ei.dir_15m, ei.dir_60m
+                   ei.ret_15m, ei.ret_60m, ei.dir_15m, ei.dir_60m,
+                   ei.expected_dir, ei.hit
             FROM events e
             LEFT JOIN event_impact ei ON ei.event_id = e.id
             ORDER BY e.time_utc DESC

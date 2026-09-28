@@ -2,19 +2,12 @@
 Агрегована статистика по impact.
 """
 
-import aiosqlite
 from app.db import get_db
 
 
 async def get_stats(symbol: str | None = None,
                     importance: str | None = None,
                     min_events: int = 1) -> dict:
-    """
-    Повертає статистику:
-      - по кожному типу подій (title): count, avg ret, win rate напрямку
-      - загальну
-    Фільтри: symbol, importance ('high' | 'medium').
-    """
     where = ["1=1"]
     params: list = []
     if symbol:
@@ -36,13 +29,17 @@ async def get_stats(symbol: str | None = None,
                 AVG(ret_60m) AS avg_60m,
                 SUM(CASE WHEN dir_15m = 'up'   THEN 1 ELSE 0 END) AS up_15m,
                 SUM(CASE WHEN dir_15m = 'down' THEN 1 ELSE 0 END) AS down_15m,
-                SUM(CASE WHEN dir_15m = 'flat' THEN 1 ELSE 0 END) AS flat_15m
+                SUM(CASE WHEN dir_15m = 'flat' THEN 1 ELSE 0 END) AS flat_15m,
+                SUM(CASE WHEN hit = 'HIT'     THEN 1 ELSE 0 END) AS hits,
+                SUM(CASE WHEN hit = 'MISS'    THEN 1 ELSE 0 END) AS misses,
+                SUM(CASE WHEN hit = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutrals,
+                SUM(CASE WHEN hit = 'N/A'     THEN 1 ELSE 0 END) AS na
             FROM event_impact ei
             WHERE {where_sql}
         """, params)
         overall = await cur.fetchone()
 
-        # По кожному title
+        # По кожному title — для таблиці + діаграм
         cur = await db.execute(f"""
             SELECT
                 e.title,
@@ -54,7 +51,11 @@ async def get_stats(symbol: str | None = None,
                 AVG(ei.ret_60m) AS avg_60m,
                 SUM(CASE WHEN ei.dir_15m = 'up'   THEN 1 ELSE 0 END) AS up_15m,
                 SUM(CASE WHEN ei.dir_15m = 'down' THEN 1 ELSE 0 END) AS down_15m,
-                SUM(CASE WHEN ei.dir_15m = 'flat' THEN 1 ELSE 0 END) AS flat_15m
+                SUM(CASE WHEN ei.dir_15m = 'flat' THEN 1 ELSE 0 END) AS flat_15m,
+                SUM(CASE WHEN ei.hit = 'HIT'     THEN 1 ELSE 0 END) AS hits,
+                SUM(CASE WHEN ei.hit = 'MISS'    THEN 1 ELSE 0 END) AS misses,
+                SUM(CASE WHEN ei.hit = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutrals,
+                SUM(CASE WHEN ei.hit = 'N/A'     THEN 1 ELSE 0 END) AS na
             FROM event_impact ei
             JOIN events e ON e.id = ei.event_id
             WHERE {where_sql}

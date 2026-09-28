@@ -1,11 +1,5 @@
 """
 Розрахунок впливу новини на ціну SOLUSDT.
-
-Для кожної події рахує:
-- baseline (T-1min close)
-- ціну через T+1, T+5, T+15, T+30, T+60 хвилин
-- % зміни
-- напрямок (up/down/flat) за динамічним порогом (ATR-based)
 """
 
 import logging
@@ -14,45 +8,33 @@ from statistics import median
 
 import aiosqlite
 
+from app.impact.expected import get_expected_direction, classify_hit
+
 logger = logging.getLogger(__name__)
 
-# Вікна у хвилинах
 WINDOWS = [1, 5, 15, 30, 60]
-
-# Мінімальний поріг (у %) — щоб у спокійні дні не було 100% flat
 MIN_THRESHOLD_PCT = 0.10
-
-# Множник для динамічного порогу (2 * медіанна 1m-волатильність)
 THRESHOLD_MULT = 2.0
-
-# Скільки хвилин історії брати для оцінки волатильності
 VOLATILITY_LOOKBACK_MIN = 24 * 60
 
 
 async def compute_impact(db: aiosqlite.Connection,
                          event_row: aiosqlite.Row) -> Optional[dict]:
-    """
-    Обчислює impact однієї події. Повертає dict для вставки в event_impact
-    або None, якщо даних недостатньо.
-    """
     from app.config import settings
 
     symbol = settings.bybit_symbol
-    interval = str(settings.bybit_kline_interval)  # "1"
+    interval = str(settings.bybit_kline_interval)
 
-    # Парсимо час події у мілісекунди
     event_ts_ms = _iso_to_ms(event_row["time_utc"])
     if event_ts_ms is None:
         return None
 
-    # Baseline: T-1 хвилина
     baseline_ts = event_ts_ms - 60_000
     baseline = await _get_close(db, symbol, interval, baseline_ts)
     if baseline is None:
         logger.debug(f"[event {event_row['id']}] немає baseline")
         return None
 
-    # Ціни у вікнах
     prices: dict[int, Optional[float]] = {}
     for w in WINDOWS:
         target_ts = event_ts_ms + w * 60_000
@@ -62,16 +44,22 @@ async def compute_impact(db: aiosqlite.Connection,
         logger.debug(f"[event {event_row['id']}] немає жодної ціни у вікнах")
         return None
 
-    # Динамічний поріг
     threshold = await _compute_threshold(db, symbol, interval, event_ts_ms)
 
-    # Розрахунок
+    # --- Expected / Hit ---
+    expected = get_expected_direction(
+        event_row["title"],
+        event_row["forecast_value"],
+        event_row["actual_value"],
+    )
+
     result = {
         "event_id": event_row["id"],
         "symbol": symbol,
         "importance": event_row["importance"],
         "price_baseline": baseline,
         "threshold_pct": threshold,
+        "expected_dir": expected,
     }
 
     for w in WINDOWS:
@@ -87,24 +75,14 @@ async def compute_impact(db: aiosqlite.Connection,
         result[f"ret_{w}m"] = ret_pct
         result[f"dir_{w}m"] = _classify(ret_pct, threshold)
 
+    # Hit рахуємо за 15m (основне вікно)
+    result["hit"] = classify_hit(expected, result.get("dir_15m"))
+
     return result
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-async def _get_close(db: aiosqlite.Connection,
-                     symbol: str, interval: str,
-                     target_ts_ms: int,
-                     tolerance_min: int = 2) -> Optional[float]:
-    """
-    Повертає close найближчої свічки до target_ts_ms у межах ±tolerance_min хвилин.
-    """
+async def _get_close(db, symbol, interval, target_ts_ms, tolerance_min=2):
     tol_ms = tolerance_min * 60_000
-    lo = target_ts_ms - tol_ms
-    hi = target_ts_ms + tol_ms
-
     cur = await db.execute("""
         SELECT ts, close FROM prices
         WHERE symbol = ? AND interval = ?
@@ -112,19 +90,13 @@ async def _get_close(db: aiosqlite.Connection,
           AND confirm = 1
         ORDER BY ABS(ts - ?) ASC
         LIMIT 1
-    """, (symbol, interval, lo, hi, target_ts_ms))
+    """, (symbol, interval, target_ts_ms - tol_ms, target_ts_ms + tol_ms,
+          target_ts_ms))
     row = await cur.fetchone()
     return float(row["close"]) if row else None
 
 
-async def _compute_threshold(db: aiosqlite.Connection,
-                             symbol: str, interval: str,
-                             event_ts_ms: int) -> float:
-    """
-    Динамічний поріг: 2 * медіанна |%| зміна за 1 хв
-    на вікні VOLATILITY_LOOKBACK_MIN до події.
-    Мінімум — MIN_THRESHOLD_PCT.
-    """
+async def _compute_threshold(db, symbol, interval, event_ts_ms):
     lo = event_ts_ms - VOLATILITY_LOOKBACK_MIN * 60_000
     hi = event_ts_ms
 
@@ -163,10 +135,8 @@ def _classify(ret_pct: float, threshold: float) -> str:
 
 
 def _iso_to_ms(iso_str: str) -> Optional[int]:
-    """ISO 8601 → epoch ms."""
     from datetime import datetime
     try:
-        # Підтримка 'Z' та '+00:00'
         s = iso_str.replace("Z", "+00:00")
         dt = datetime.fromisoformat(s)
         return int(dt.timestamp() * 1000)
