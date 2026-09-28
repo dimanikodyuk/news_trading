@@ -1,8 +1,6 @@
 """
-Завантаження історичних свічок SOLUSDT через Bybit REST.
-
-Використовується і скриптом scripts/load_history.py, і scheduler-ом
-усередині FastAPI (щоденне довантаження останніх 2 днів).
+Завантаження історичних свічок з Bybit REST.
+Підтримує кілька символів.
 """
 
 import time
@@ -16,15 +14,29 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+SYMBOLS = ["SOLUSDT", "BTCUSDT", "ETHUSDT"]
 
-def load_history_sync(days: int = 30, interval: str = "1") -> int:
+
+def load_history_sync(days: int = 30, interval: str = "1",
+                      symbol: str | None = None) -> int:
     """
-    Синхронне завантаження свічок SOLUSDT за останні `days` днів.
-    Повертає кількість збережених свічок.
+    Завантажує свічки за останні `days` днів.
+    Якщо symbol=None — завантажує для всіх SYMBOLS.
     """
+    symbols = [symbol] if symbol else SYMBOLS
+    total_all = 0
+
+    for sym in symbols:
+        total_all += _load_one(sym, days, interval)
+
+    logger.info(f"load_history_sync: всього {total_all} свічок "
+                f"для {len(symbols)} символів")
+    return total_all
+
+
+def _load_one(symbol: str, days: int, interval: str) -> int:
     session = HTTP(testnet=False)
 
-    symbol = settings.bybit_symbol
     db_path = Path(settings.db_path_abs)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -36,7 +48,6 @@ def load_history_sync(days: int = 30, interval: str = "1") -> int:
     end_ts = None
     total = 0
     page = 0
-
     cutoff_ms = int((time.time() - days * 24 * 60 * 60) * 1000)
 
     while True:
@@ -50,27 +61,25 @@ def load_history_sync(days: int = 30, interval: str = "1") -> int:
         if end_ts:
             params["end"] = end_ts
 
-        # --- Retry ×3 з backoff ---
         resp = None
         for attempt in range(3):
             try:
                 resp = session.get_kline(**params)
                 break
             except Exception as ex:
-                logger.warning(f"Спроба {attempt + 1}/3 не вдалась: {ex}")
+                logger.warning(f"[{symbol}] спроба {attempt + 1}/3: {ex}")
                 time.sleep(1.5 * (attempt + 1))
 
         if resp is None:
-            logger.error("Bybit недоступний після 3 спроб. Зупиняємось.")
+            logger.error(f"[{symbol}] Bybit недоступний")
             break
 
         if resp.get("retCode") != 0:
-            logger.error(f"Bybit error: {resp}")
+            logger.error(f"[{symbol}] Bybit error: {resp}")
             break
 
         candles = resp["result"]["list"]
         if not candles:
-            logger.info("Порожня відповідь — досягли кінця історії.")
             break
 
         for c in candles:
@@ -91,10 +100,10 @@ def load_history_sync(days: int = 30, interval: str = "1") -> int:
         oldest_ts = int(candles[-1][0])
         end_ts = oldest_ts - 1
 
-        if page % 5 == 0 or oldest_ts < cutoff_ms:
+        if page % 10 == 0 or oldest_ts < cutoff_ms:
             logger.info(
-                f"Сторінка {page:3}: +{len(candles)} (всього {total}), "
-                f"найстаріша = {_ts_to_str(oldest_ts)}"
+                f"[{symbol}] Сторінка {page:3}: +{len(candles)} "
+                f"(всього {total}), найстаріша = {_ts_to_str(oldest_ts)}"
             )
 
         if oldest_ts < cutoff_ms:
@@ -103,7 +112,7 @@ def load_history_sync(days: int = 30, interval: str = "1") -> int:
         time.sleep(0.15)
 
     conn.close()
-    logger.info(f"load_history_sync: {total} свічок (days={days})")
+    logger.info(f"[{symbol}] ✅ Готово: {total} свічок")
     return total
 
 

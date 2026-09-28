@@ -1,55 +1,67 @@
+"""
+WebSocket Bybit: підписка на kline для SOLUSDT, BTCUSDT, ETHUSDT.
+"""
+
 import asyncio
-import json
 import logging
+import sqlite3
+from pathlib import Path
+
 from pybit.unified_trading import WebSocket
 from app.config import settings
-from app.db import get_db
 
 logger = logging.getLogger(__name__)
 
-def _save_kline(data: dict):
-    import sqlite3
-    from pathlib import Path
-    from app.config import settings
+# Символи для моніторингу
+SYMBOLS = ["SOLUSDT", "BTCUSDT", "ETHUSDT"]
 
-    Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(settings.db_path)
+
+def _save_kline(symbol: str, interval: str, data: dict):
+    """Синхронний запис свічки у SQLite (викликається з callback-потоку pybit)."""
+    db_path = Path(settings.db_path_abs)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(db_path))
     try:
         conn.execute("""
             INSERT OR REPLACE INTO prices
             (symbol, interval, ts, open, close, high, low, volume, confirm)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            settings.bybit_symbol,
-            str(settings.bybit_kline_interval),
+            symbol, interval,
             int(data["start"]),
             float(data["open"]), float(data["close"]),
             float(data["high"]), float(data["low"]),
-            float(data["volume"]), 1 if data.get("confirm") else 0,
+            float(data["volume"]),
+            1 if data.get("confirm") else 0,
         ))
         conn.commit()
     finally:
         conn.close()
 
-def handle_kline(message: dict):
-    """Callback від Bybit WebSocket."""
-    if message.get("topic", "").startswith("kline"):
-        for candle in message.get("data", []):
-            _save_kline(candle)
-            if candle.get("confirm"):
-                logger.debug(f"Closed candle: {candle['close']}")
+
+def _make_handler(symbol: str, interval: str):
+    """Створює callback для конкретного символу."""
+    def handler(message: dict):
+        if message.get("topic", "").startswith("kline"):
+            for candle in message.get("data", []):
+                _save_kline(symbol, interval, candle)
+    return handler
+
 
 async def run_ws():
-    """Запускає WebSocket у окремому потоці (pybit не async)."""
-    ws = WebSocket(
-        testnet=False,
-        channel_type="spot",
-    )
-    ws.kline_stream(
-        interval=settings.bybit_kline_interval,
-        symbol=settings.bybit_symbol,
-        callback=handle_kline,
-    )
-    logger.info(f"Subscribed to kline.{settings.bybit_kline_interval}.{settings.bybit_symbol}")
+    """Запускає WebSocket для всіх символів у фоновому режимі."""
+    interval = settings.bybit_kline_interval
+
+    ws = WebSocket(testnet=False, channel_type="spot")
+
+    for sym in SYMBOLS:
+        ws.kline_stream(
+            interval=interval,
+            symbol=sym,
+            callback=_make_handler(sym, str(interval)),
+        )
+        logger.info(f"Subscribed to kline.{interval}.{sym}")
+
     while True:
         await asyncio.sleep(60)

@@ -1,5 +1,5 @@
 """
-Розрахунок впливу новини на ціну SOLUSDT.
+Розрахунок впливу новини на ціну (SOL/BTC/ETH).
 """
 
 import logging
@@ -19,10 +19,11 @@ VOLATILITY_LOOKBACK_MIN = 24 * 60
 
 
 async def compute_impact(db: aiosqlite.Connection,
-                         event_row: aiosqlite.Row) -> Optional[dict]:
+                         event_row: aiosqlite.Row,
+                         symbol: str | None = None) -> Optional[dict]:
     from app.config import settings
 
-    symbol = settings.bybit_symbol
+    sym = symbol or settings.bybit_symbol
     interval = str(settings.bybit_kline_interval)
 
     event_ts_ms = _iso_to_ms(event_row["time_utc"])
@@ -30,23 +31,20 @@ async def compute_impact(db: aiosqlite.Connection,
         return None
 
     baseline_ts = event_ts_ms - 60_000
-    baseline = await _get_close(db, symbol, interval, baseline_ts)
+    baseline = await _get_close(db, sym, interval, baseline_ts)
     if baseline is None:
-        logger.debug(f"[event {event_row['id']}] немає baseline")
         return None
 
     prices: dict[int, Optional[float]] = {}
     for w in WINDOWS:
         target_ts = event_ts_ms + w * 60_000
-        prices[w] = await _get_close(db, symbol, interval, target_ts)
+        prices[w] = await _get_close(db, sym, interval, target_ts)
 
     if all(v is None for v in prices.values()):
-        logger.debug(f"[event {event_row['id']}] немає жодної ціни у вікнах")
         return None
 
-    threshold = await _compute_threshold(db, symbol, interval, event_ts_ms)
+    threshold = await _compute_threshold(db, sym, interval, event_ts_ms)
 
-    # --- Expected / Hit ---
     expected = get_expected_direction(
         event_row["title"],
         event_row["forecast_value"],
@@ -55,7 +53,7 @@ async def compute_impact(db: aiosqlite.Connection,
 
     result = {
         "event_id": event_row["id"],
-        "symbol": symbol,
+        "symbol": sym,
         "importance": event_row["importance"],
         "price_baseline": baseline,
         "threshold_pct": threshold,
@@ -69,15 +67,12 @@ async def compute_impact(db: aiosqlite.Connection,
             result[f"ret_{w}m"] = None
             result[f"dir_{w}m"] = None
             continue
-
         ret_pct = (p - baseline) / baseline * 100.0
         result[f"price_t{w}"] = p
         result[f"ret_{w}m"] = ret_pct
         result[f"dir_{w}m"] = _classify(ret_pct, threshold)
 
-    # Hit рахуємо за 15m (основне вікно)
     result["hit"] = classify_hit(expected, result.get("dir_15m"))
-
     return result
 
 

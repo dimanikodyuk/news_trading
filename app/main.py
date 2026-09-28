@@ -26,9 +26,9 @@ from app.calendar.parser import fetch_events
 from app.prices.bybit_ws import run_ws
 from app.prices.history import load_history_sync
 from app.impact.batch import process_all_past_events
-from app.impact.stats import get_stats
 from app.bot.notifier import notify_impact
 
+from app.impact.stats import get_stats, get_heatmap, get_cross_asset_detail
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -184,6 +184,13 @@ STATIC_DIR.mkdir(exist_ok=True)
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
+@app.get("/impact/heatmap")
+async def api_impact_heatmap(importance: str | None = None):
+    return await get_heatmap(importance=importance)
+
+@app.get("/impact/cross_asset/{event_id}")
+async def api_impact_cross_asset(event_id: int):
+    return await get_cross_asset_detail(event_id)
 
 # ============================================================================
 # API
