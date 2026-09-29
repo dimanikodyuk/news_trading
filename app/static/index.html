@@ -62,6 +62,7 @@
     70% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
     100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
   }
+  .time-utc { color: #64748b; font-size: 0.75rem; }
 </style>
 </head>
 <body class="min-h-screen">
@@ -71,6 +72,7 @@
     <a href="#" class="text-xl font-bold text-cyan-400">📊 News Bot</a>
     <span class="ml-auto text-sm text-slate-500">
       SOL/BTC/ETH · <span id="ws-status" class="text-red-400">● offline</span>
+      · <span class="tip" data-tip="Час у веб-панелі — за Києвом (Europe/Kyiv). У дужках — UTC.">🕒 Київ</span>
     </span>
   </div>
 </nav>
@@ -102,7 +104,7 @@
       <h2 class="section-title">Останні розраховані події</h2>
       <table>
         <thead><tr>
-          <th>Час (UTC)</th>
+          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
           <th>Подія</th>
           <th>Важл.</th>
           <th class="text-right">SOL ret 15хв</th>
@@ -134,9 +136,9 @@
         <div class="hint">Подій × символів з impact</div>
       </div>
       <div class="card p-4">
-        <div class="text-sm text-slate-400 tip" data-tip="Час останньої свічки в БД.">Остання свічка (UTC)</div>
+        <div class="text-sm text-slate-400 tip" data-tip="Час останньої свічки в БД.">Остання свічка</div>
         <div class="text-sm font-mono" id="stat-last">—</div>
-        <div class="hint">Час останнього оновлення ціни</div>
+        <div class="hint">Київ / UTC</div>
       </div>
     </div>
 
@@ -160,7 +162,7 @@
         </div>
       </div>
       <canvas id="price-chart" height="100"></canvas>
-      <div class="hint mt-2">🔴 high · 🟡 medium · клік на маркері → деталі події</div>
+      <div class="hint mt-2">🔴 high · 🟡 medium · клік на маркері → деталі події · час на осі X — Київ</div>
     </div>
 
     <div class="card p-4 mb-6" id="overall-impact-card" style="display:none">
@@ -178,7 +180,7 @@
       </div>
       <table>
         <thead><tr>
-          <th class="tip" data-tip="Час публікації в UTC.">Час</th>
+          <th class="tip" data-tip="Час публікації. Київ / UTC.">Час <span class="time-utc">(Київ / UTC)</span></th>
           <th class="tip" data-tip="Важливість події.">Важл.</th>
           <th class="tip" data-tip="Валюта.">Вал.</th>
           <th class="tip" data-tip="Назва події.">Подія</th>
@@ -203,7 +205,7 @@
       <table>
         <thead><tr>
           <th>ID</th>
-          <th class="tip" data-tip="Час публікації (UTC).">Час</th>
+          <th class="tip" data-tip="Час публікації. Київ / UTC.">Час <span class="time-utc">(Київ / UTC)</span></th>
           <th class="tip" data-tip="Важливість.">Важл.</th>
           <th>Вал.</th>
           <th>Подія</th>
@@ -257,7 +259,7 @@
 
     <div class="card p-4 mb-6">
       <h2 class="section-title">
-        <span class="tip" data-tip="Середня зміна ціни SOL через 15 хв після події. По горизонталі — години UTC, по вертикалі — дні тижня. Зелений — в середньому вгору, червоний — вниз, сірий — немає даних.">
+        <span class="tip" data-tip="Середня зміна ціни SOL через 15 хв після події. По горизонталі — години UTC, по вертикалі — дні тижня.">
           Середній ret_15m по (день × година UTC)
         </span>
       </h2>
@@ -265,20 +267,20 @@
         <span class="loading"></span>
       </div>
       <div class="hint mt-2">
-        🟢 середнє зростання · 🔴 середнє падіння · сірий = немає даних · наведи на клітинку для деталей
+        🟢 середнє зростання · 🔴 середнє падіння · сірий = немає даних · години показані як UTC+0, але з підписом
       </div>
     </div>
 
     <div class="card p-4">
       <h2 class="section-title">
-        <span class="tip" data-tip="Порівняння реакції SOL/BTC/ETH на ту саму подію. Показує, чи рухається SOL самостійно, чи слідом за BTC.">
+        <span class="tip" data-tip="Порівняння реакції SOL/BTC/ETH на ту саму подію.">
           Cross-asset: SOL vs BTC vs ETH
         </span>
       </h2>
       <div id="cross-asset-summary" class="mb-4"></div>
       <table>
         <thead><tr>
-          <th>Час (UTC)</th>
+          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
           <th>Подія</th>
           <th class="text-right">SOL ret 15хв</th>
           <th class="text-right">BTC ret 15хв</th>
@@ -293,6 +295,16 @@
   <!-- ==================== HELP ==================== -->
   <div id="tab-help" style="display:none">
     <h1 class="text-2xl font-bold mb-6">Довідка</h1>
+
+    <div class="card p-6 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Про час</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Усі розрахунки (impact, вікна T+1, T+5, T+15, T+30, T+60) ведуться в <b>UTC</b> — це стандарт для фінансових даних.<br><br>
+        У веб-інтерфейсі час показується у <b>Europe/Kyiv (EEST, UTC+3 улітку / UTC+2 узимку)</b>
+        для зручності, а UTC — у дужках поруч.
+        Формат: <code class="bg-slate-700 px-1 rounded">18:30 (15:30 UTC)</code>.
+      </p>
+    </div>
 
     <div class="card p-6 mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Що це за проєкт</h2>
@@ -401,6 +413,78 @@
 </div>
 
 <script>
+// ==================== TIME FORMATTING ====================
+const LOCAL_TZ = 'Europe/Kyiv';
+
+function parseUtc(isoStr) {
+  if (!isoStr) return null;
+  if (!isoStr.endsWith('Z') && !isoStr.includes('+')) {
+    isoStr += 'Z';
+  }
+  return new Date(isoStr);
+}
+
+function fmtLocalTime(isoStr) {
+  const d = parseUtc(isoStr);
+  if (!d) return '—';
+  return d.toLocaleTimeString('uk-UA', {
+    timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false
+  });
+}
+
+function fmtLocalDateTime(isoStr) {
+  const d = parseUtc(isoStr);
+  if (!d) return '—';
+  return d.toLocaleString('uk-UA', {
+    timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).replace(',', '');
+}
+
+function fmtBoth(isoStr) {
+  const d = parseUtc(isoStr);
+  if (!d) return '—';
+  const local = d.toLocaleTimeString('uk-UA', {
+    timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  const utc = d.toLocaleTimeString('uk-UA', {
+    timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  return `${local} <span class="time-utc">(${utc} UTC)</span>`;
+}
+
+function fmtBothFull(isoStr) {
+  const d = parseUtc(isoStr);
+  if (!d) return '—';
+  const local = d.toLocaleString('uk-UA', {
+    timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).replace(',', '');
+  const utc = d.toLocaleString('uk-UA', {
+    timeZone: 'UTC', day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).replace(',', '');
+  return `${local} <span class="time-utc">(${utc} UTC)</span>`;
+}
+
+// Для stat-last: беремо "2026-09-29 14:21 UTC" → показуємо "29.09 17:21 (14:21 UTC)"
+function fmtStatLast(tsStr) {
+  if (!tsStr || tsStr === '—') return '—';
+  // Формат з сервера: "2026-09-29 14:21 UTC"
+  const m = tsStr.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+  if (!m) return tsStr;
+  const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00Z`;
+  const d = new Date(iso);
+  const local = d.toLocaleString('uk-UA', {
+    timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).replace(',', '');
+  const utc = d.toLocaleTimeString('uk-UA', {
+    timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  return `${local} <span class="time-utc">(${utc} UTC)</span>`;
+}
+
 // ==================== TABS ====================
 document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
@@ -481,7 +565,7 @@ function renderLiveCard(item) {
       <div class="flex justify-between items-start mb-3 flex-wrap gap-2">
         <div>
           <div class="text-lg font-semibold">${impEmoji} ${ev.title}</div>
-          <div class="text-sm text-slate-400">${ev.country} · ${ev.time_utc.slice(11, 16)} UTC
+          <div class="text-sm text-slate-400">${ev.country} · ${fmtBoth(ev.time_utc)}
             · Forecast: <span class="font-mono">${ev.forecast_value || '—'}</span>
             · Actual: <span class="font-mono">${ev.actual_value || '—'}</span>
           </div>
@@ -526,7 +610,7 @@ async function loadLiveRecent() {
   const recent = events.filter(e => e.hit && e.hit !== 'N/A').slice(0, 15);
   tbody.innerHTML = recent.map(e => `
     <tr class="cursor-pointer" onclick="openEvent(${e.id})">
-      <td class="font-mono text-xs">${e.time_utc.slice(0, 16)}</td>
+      <td class="font-mono text-xs">${fmtBothFull(e.time_utc)}</td>
       <td class="text-cyan-400">${e.title}</td>
       <td>${badge(e.importance)}</td>
       <td class="text-right font-mono ${clsForDir(e.dir_15m)}">${e.ret_15m != null ? fmtPct(e.ret_15m) : '—'}</td>
@@ -570,8 +654,13 @@ async function loadPriceChart(hours = null) {
   const labels = grouped.map(c => {
     const d = new Date(c.ts);
     return currentChartHours >= 24
-      ? d.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleTimeString('uk-UA', { hour12: false });
+      ? d.toLocaleString('uk-UA', {
+          timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
+          hour: '2-digit', minute: '2-digit', hour12: false
+        }).replace(',', '')
+      : d.toLocaleTimeString('uk-UA', {
+          timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false
+        });
   });
   const prices = grouped.map(c => c.close);
 
@@ -641,7 +730,8 @@ async function loadPriceChart(hours = null) {
         if (ev) openEvent(ev.id);
       },
       scales: {
-        x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' } },
+        x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' },
+             title: { display: true, text: 'Час (Київ)', color: '#94a3b8' } },
         y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
              title: { display: true, text: 'Ціна, USD', color: '#94a3b8' } },
       }
@@ -655,13 +745,13 @@ async function loadDashboard() {
   document.getElementById('stat-events').textContent = stats.events_count;
   document.getElementById('stat-prices').textContent = stats.prices_count.toLocaleString();
   document.getElementById('stat-impact').textContent = stats.impact_count;
-  document.getElementById('stat-last').textContent = stats.last_ts || '—';
+  document.getElementById('stat-last').innerHTML = fmtStatLast(stats.last_ts);
 
   const events = await api('/events?limit=10');
   const tbody = document.getElementById('recent-events');
   tbody.innerHTML = events.map(e => `
     <tr class="cursor-pointer" onclick="openEvent(${e.id})">
-      <td class="font-mono text-xs">${e.time_utc.slice(0,16)}</td>
+      <td class="font-mono text-xs">${fmtBothFull(e.time_utc)}</td>
       <td>${badge(e.importance)}</td>
       <td class="font-mono">${e.country}</td>
       <td class="text-cyan-400">${e.title}</td>
@@ -710,7 +800,7 @@ async function loadEvents(importance = null) {
   tbody.innerHTML = filtered.map(e => `
     <tr class="cursor-pointer" onclick="openEvent(${e.id})">
       <td class="font-mono text-xs text-slate-500">${e.id}</td>
-      <td class="font-mono text-xs">${e.time_utc.slice(0,16)}</td>
+      <td class="font-mono text-xs">${fmtBothFull(e.time_utc)}</td>
       <td>${badge(e.importance)}</td>
       <td class="font-mono">${e.country}</td>
       <td class="text-cyan-400">${e.title}</td>
@@ -812,9 +902,20 @@ async function loadHeatmap() {
     return `rgba(239,68,68,${0.15 + 0.85 * Math.abs(norm)})`;
   }
 
+  function kyivHourLabel(utcHour) {
+    // Показуємо рядок типу "3 (0)" — Київ (UTC)
+    const d = new Date(Date.UTC(2026, 0, 1, utcHour, 0, 0));
+    const kh = parseInt(d.toLocaleTimeString('uk-UA', {
+      timeZone: LOCAL_TZ, hour: '2-digit', hour12: false
+    }), 10);
+    return `${kh}`;
+  }
+
   let html = `<table style="border-collapse: separate; border-spacing: 2px;">`;
-  html += `<tr><th style="padding:4px;font-size:0.7rem;color:#94a3b8"></th>`;
-  for (const h of hours) html += `<th style="padding:4px;font-size:0.65rem;color:#94a3b8;text-align:center">${h}</th>`;
+  html += `<tr><th style="padding:4px;font-size:0.7rem;color:#94a3b8;text-align:right">Київ →<br><span style="font-size:0.6rem">UTC ↓</span></th>`;
+  for (const h of hours) {
+    html += `<th style="padding:4px;font-size:0.65rem;color:#94a3b8;text-align:center">${kyivHourLabel(h)}</th>`;
+  }
   html += `</tr>`;
 
   for (const d of [1,2,3,4,5,6,0]) {
@@ -824,9 +925,10 @@ async function loadHeatmap() {
       const avg = cell?.avg_15m ?? null;
       const n = cell?.n ?? 0;
       const bg = colorFor(avg);
+      const utcLabel = `${days[d]} ${String(h).padStart(2,'0')}:00 UTC`;
       const title = cell
-        ? `${days[d]} ${h}:00 UTC\nn=${n}\nAvg +15хв: ${avg?.toFixed(3)}%\nAvg +60хв: ${cell.avg_60m?.toFixed(3)}%`
-        : `${days[d]} ${h}:00 UTC — немає даних`;
+        ? `${utcLabel}\nКиїв: ${kyivHourLabel(h)}:00\nn=${n}\nAvg +15хв: ${avg?.toFixed(3)}%\nAvg +60хв: ${cell.avg_60m?.toFixed(3)}%`
+        : `${utcLabel} — немає даних`;
       const text = avg != null ? avg.toFixed(1) : '';
       html += `<td title="${title}" style="background:${bg};width:32px;height:28px;text-align:center;font-size:0.65rem;color:#fff;border-radius:3px;font-family:monospace">${text}</td>`;
     }
@@ -860,7 +962,7 @@ async function loadCrossAsset() {
                                    : '<span class="badge-miss px-2 py-0.5 rounded text-xs">НІ</span>');
     return `
       <tr>
-        <td class="font-mono text-xs">${r.time_utc.slice(0,16)}</td>
+        <td class="font-mono text-xs">${fmtBothFull(r.time_utc)}</td>
         <td class="text-cyan-400">${r.title}</td>
         <td class="text-right font-mono ${clsFor(r.sol_15m)}">${fmtPct(r.sol_15m)}</td>
         <td class="text-right font-mono ${clsFor(r.btc_15m)}">${fmtPct(r.btc_15m)}</td>
@@ -879,7 +981,7 @@ async function openEvent(id) {
   document.getElementById('modal-title').textContent = e.title;
   let body = `
     <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-      <div><span class="text-slate-400">Час:</span> <span class="font-mono">${e.time_utc}</span></div>
+      <div><span class="text-slate-400">Час (Київ / UTC):</span> <span class="font-mono">${fmtBothFull(e.time_utc)}</span></div>
       <div><span class="text-slate-400">Валюта:</span> <span class="font-mono">${e.country}</span></div>
       <div><span class="text-slate-400">Важливість:</span> ${badge(e.importance)}</div>
       <div><span class="text-slate-400">Forecast / Prev / Actual:</span>
@@ -972,7 +1074,6 @@ setInterval(() => {
   if (active && active.dataset.tab === 'live') loadLive();
 }, 30000);
 
-// Окремий швидкий цикл для LIVE (кожні 3 сек, fallback)
 setInterval(() => {
   const active = document.querySelector('.tab.active');
   if (active && active.dataset.tab === 'live') loadLive();
