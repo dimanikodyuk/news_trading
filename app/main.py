@@ -23,7 +23,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import settings
 from app.db import init_db, get_db
 from app.calendar.parser import fetch_events
-from app.prices.bybit_ws import run_ws
+from app.prices.bybit_ws import start_ws_thread
 from app.prices.history import load_history_sync
 from app.impact.batch import process_all_past_events
 from app.impact.stats import get_stats, get_heatmap, get_cross_asset_detail
@@ -39,7 +39,7 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 
 
 # ---------------------------------------------------------------------------
-# WebSocket connection manager
+# WebSocket connection manager (для веб-панелі)
 # ---------------------------------------------------------------------------
 class ConnectionManager:
     def __init__(self):
@@ -190,7 +190,9 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info(f"Scheduler started. Jobs: {[j.id for j in scheduler.get_jobs()]}")
 
-    asyncio.create_task(run_ws())
+    # WebSocket Bybit — у власному потоці (не asyncio-task!)
+    start_ws_thread()
+
     asyncio.create_task(recompute_impact_job())
     asyncio.create_task(live_broadcast_loop())
 
@@ -337,7 +339,6 @@ async def api_impact_stats(symbol: str | None = None,
 
 @app.get("/impact/event/{event_id}")
 async def api_impact_event(event_id: int):
-    """Повертає impact для SOL за замовчуванням (зворотна сумісність)."""
     async with get_db() as db:
         cur = await db.execute("""
             SELECT ei.*, e.title, e.country, e.time_utc
@@ -363,7 +364,6 @@ async def api_impact_cross_asset(event_id: int):
 # API: LIVE
 # ============================================================================
 async def _build_live_current() -> dict:
-    """Повертає активні події (±2 хв від now) з поточними цінами."""
     now_ms = int(_time.time() * 1000)
     window_ms = 2 * 60 * 1000
 
@@ -391,7 +391,6 @@ async def _build_live_current() -> dict:
             symbols_data = {}
 
             for sym in ["SOLUSDT", "BTCUSDT", "ETHUSDT"]:
-                # Baseline
                 cur = await db.execute("""
                     SELECT close FROM prices
                     WHERE symbol = ? AND interval = '1' AND confirm = 1
@@ -401,7 +400,6 @@ async def _build_live_current() -> dict:
                 row = await cur.fetchone()
                 baseline = float(row["close"]) if row else None
 
-                # Остання свічка
                 cur = await db.execute("""
                     SELECT ts, close FROM prices
                     WHERE symbol = ? AND interval = '1'
