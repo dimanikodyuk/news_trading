@@ -1,5 +1,5 @@
 """
-Агрегована статистика по impact + cross-asset (SOL vs BTC vs ETH).
+Агрегована статистика по impact + cross-asset + excess return.
 """
 
 from app.db import get_db
@@ -33,7 +33,8 @@ async def get_stats(symbol: str | None = None,
                 SUM(CASE WHEN hit = 'HIT'     THEN 1 ELSE 0 END) AS hits,
                 SUM(CASE WHEN hit = 'MISS'    THEN 1 ELSE 0 END) AS misses,
                 SUM(CASE WHEN hit = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutrals,
-                SUM(CASE WHEN hit = 'N/A'     THEN 1 ELSE 0 END) AS na
+                SUM(CASE WHEN hit = 'N/A'     THEN 1 ELSE 0 END) AS na,
+                SUM(CASE WHEN hit = 'NO_DATA' THEN 1 ELSE 0 END) AS no_data
             FROM event_impact ei
             WHERE {where_sql}
         """, params)
@@ -55,7 +56,8 @@ async def get_stats(symbol: str | None = None,
                 SUM(CASE WHEN ei.hit = 'HIT'     THEN 1 ELSE 0 END) AS hits,
                 SUM(CASE WHEN ei.hit = 'MISS'    THEN 1 ELSE 0 END) AS misses,
                 SUM(CASE WHEN ei.hit = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutrals,
-                SUM(CASE WHEN ei.hit = 'N/A'     THEN 1 ELSE 0 END) AS na
+                SUM(CASE WHEN ei.hit = 'N/A'     THEN 1 ELSE 0 END) AS na,
+                SUM(CASE WHEN ei.hit = 'NO_DATA' THEN 1 ELSE 0 END) AS no_data
             FROM event_impact ei
             JOIN events e ON e.id = ei.event_id
             WHERE {where_sql}
@@ -65,9 +67,7 @@ async def get_stats(symbol: str | None = None,
         """, params + [min_events])
         by_title = [dict(r) for r in await cur.fetchall()]
 
-        # --- Cross-asset: середній рух BTC і ETH для кожної події ---
-        # Беремо всі event_impact для SOL, і для кожної події шукаємо
-        # відповідні ret_15m для BTCUSDT і ETHUSDT.
+        # --- Cross-asset: SOL vs BTC vs ETH ---
         cur = await db.execute("""
             SELECT
                 ei.event_id,
@@ -92,13 +92,25 @@ async def get_stats(symbol: str | None = None,
         # Агрегація: скільки разів SOL рухався в той самий бік, що BTC
         same_as_btc = 0
         total_with_btc = 0
+        sum_sol = 0.0
+        sum_btc = 0.0
+        n_excess = 0
+
         for row in cross_asset:
             if row["sol_dir"] and row["btc_dir"] and row["sol_dir"] != "flat" and row["btc_dir"] != "flat":
                 total_with_btc += 1
                 if row["sol_dir"] == row["btc_dir"]:
                     same_as_btc += 1
 
+            if row["sol_15m"] is not None and row["btc_15m"] is not None:
+                sum_sol += row["sol_15m"]
+                sum_btc += row["btc_15m"]
+                n_excess += 1
+
         corr_btc = (same_as_btc / total_with_btc * 100) if total_with_btc > 0 else None
+        avg_sol = (sum_sol / n_excess) if n_excess > 0 else None
+        avg_btc = (sum_btc / n_excess) if n_excess > 0 else None
+        excess = (avg_sol - avg_btc) if (avg_sol is not None and avg_btc is not None) else None
 
     return {
         "overall": dict(overall) if overall else {},
@@ -108,15 +120,14 @@ async def get_stats(symbol: str | None = None,
             "n_events": total_with_btc,
             "same_direction_as_btc": same_as_btc,
             "correlation_pct": corr_btc,
+            "avg_sol_ret_15m": avg_sol,
+            "avg_btc_ret_15m": avg_btc,
+            "avg_excess_sol_vs_btc": excess,
         },
     }
 
 
 async def get_heatmap(importance: str | None = None) -> dict:
-    """
-    Heatmap: середній ret_15m по (день_тижня × година_UTC).
-    Використовує SQLite strftime на time_utc.
-    """
     where = "WHERE ei.ret_15m IS NOT NULL"
     params: list = []
     if importance:
@@ -126,7 +137,7 @@ async def get_heatmap(importance: str | None = None) -> dict:
     async with get_db() as db:
         cur = await db.execute(f"""
             SELECT
-                CAST(strftime('%w', e.time_utc) AS INTEGER) AS dow,   -- 0=Нд..6=Сб
+                CAST(strftime('%w', e.time_utc) AS INTEGER) AS dow,
                 CAST(strftime('%H', e.time_utc) AS INTEGER) AS hour,
                 COUNT(*) AS n,
                 AVG(ei.ret_15m) AS avg_15m,
@@ -143,7 +154,6 @@ async def get_heatmap(importance: str | None = None) -> dict:
 
 
 async def get_cross_asset_detail(event_id: int) -> dict:
-    """Повертає impact по SOL/BTC/ETH для однієї події."""
     async with get_db() as db:
         cur = await db.execute("""
             SELECT symbol, ret_1m, ret_5m, ret_15m, ret_30m, ret_60m,

@@ -1,15 +1,5 @@
 """
 Визначення очікуваного напрямку руху ціни на основі економічної події.
-
-Логіка: для кожної події є правило, яке каже, куди "має" піти ціна
-ризикових активів (SOL) при actual > forecast і при actual < forecast.
-
-Консервативна логіка (baseline):
-- Інфляція вище прогнозу → hawkish Fed → risk-off → SOL down
-- Зайнятість вище прогнозу → сильна економіка → hawkish → SOL down
-- GDP вище прогнозу → risk-on → SOL up
-- Unemployment вище → dovish → SOL up
-- Rate hike → SOL down, cut → up
 """
 
 import logging
@@ -18,11 +8,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-# Кожне правило: список patterns у title → що робити при higher/lower
 RULES = [
     # --- USD: інфляція ---
     {"pattern": ["cpi m/m", "cpi y/y", "core cpi", "ppi m/m", "ppi y/y",
-                 "core pce", "pce price index", "trimmed mean cpi"],
+                 "core pce", "pce price index", "trimmed mean cpi",
+                 "pce price index m/m", "core pce price index m/m"],
      "higher": "down", "lower": "up"},
 
     # --- USD: зайнятість ---
@@ -38,7 +28,7 @@ RULES = [
     {"pattern": ["retail sales"],
      "higher": "up", "lower": "down"},
 
-    # --- USD: безробіття (вище = погано = dovish = up) ---
+    # --- USD: безробіття ---
     {"pattern": ["unemployment rate"],
      "higher": "up", "lower": "down"},
 
@@ -56,15 +46,15 @@ RULES = [
     {"pattern": ["cb consumer confidence", "consumer confidence"],
      "higher": "up", "lower": "down"},
 
-    # --- JOLTS (більше вакансій = сильніший ринок = hawkish = down) ---
+    # --- JOLTS ---
     {"pattern": ["jolts"],
      "higher": "down", "lower": "up"},
 
-    # --- Trade balance (менший дефіцит = сильніше = risk-on) ---
+    # --- Trade balance ---
     {"pattern": ["trade balance"],
      "higher": "up", "lower": "down"},
 
-    # --- Building permits / housing (сильніше = risk-on) ---
+    # --- Building permits / housing ---
     {"pattern": ["building permits", "housing starts"],
      "higher": "up", "lower": "down"},
 
@@ -111,12 +101,7 @@ def get_expected_direction(title: str,
 
 
 def _parse_number(s: str) -> Optional[float]:
-    """
-    '0.3%' → 0.3
-    '250K' → 250000
-    '-1.2' → -1.2
-    '1.5B' → 1.5e9
-    """
+    """'0.3%' → 0.3, '250K' → 250000, '-1.2' → -1.2"""
     if not s:
         return None
 
@@ -141,14 +126,18 @@ def _parse_number(s: str) -> Optional[float]:
         return None
 
 
-def classify_hit(expected: Optional[str], actual: Optional[str]) -> str:
+def classify_hit(expected: Optional[str], actual: Optional[str],
+                 has_data: bool = True) -> str:
     """
     Повертає:
-      HIT      — напрямок справдився
-      MISS     — не справдився
-      NEUTRAL  — хтось із них 'flat'
-      N/A      — немає expected або actual
+      HIT       — напрямок справдився
+      MISS      — не справдився
+      NEUTRAL   — хтось із них 'flat'
+      N/A       — немає expected або actual
+      NO_DATA   — взагалі немає forecast/actual (наприклад, виступи)
     """
+    if not has_data:
+        return "NO_DATA"
     if expected is None or actual is None:
         return "N/A"
     if expected == "flat" or actual == "flat":

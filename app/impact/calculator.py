@@ -72,7 +72,10 @@ async def compute_impact(db: aiosqlite.Connection,
         result[f"ret_{w}m"] = ret_pct
         result[f"dir_{w}m"] = _classify(ret_pct, threshold)
 
-    result["hit"] = classify_hit(expected, result.get("dir_15m"))
+    # Чи є взагалі дані для розрахунку hit?
+    has_data = bool(event_row["forecast_value"] and event_row["actual_value"])
+    result["hit"] = classify_hit(expected, result.get("dir_15m"),
+                                 has_data=has_data)
     return result
 
 

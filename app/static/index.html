@@ -144,7 +144,7 @@
 
     <div class="card p-4 mb-6" id="hit-rate-card" style="display:none">
       <h2 class="section-title">
-        <span class="tip" data-tip="Загальний відсоток влучань: скільки разів напрямок руху ціни збігся з очікуваним.">🎯 Загальний Hit Rate</span>
+        <span class="tip" data-tip="Загальний відсоток влучань: скільки разів напрямок руху ціни збігся з очікуваним. Рахується тільки для подій, де є forecast і actual.">🎯 Загальний Hit Rate</span>
       </h2>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="hit-rate-summary"></div>
     </div>
@@ -212,7 +212,7 @@
           <th class="text-right tip" data-tip="Фактичний рух ціни через 15 хвилин.">Ret 15хв</th>
           <th class="text-right tip" data-tip="Фактичний рух ціни через 60 хвилин.">Ret 60хв</th>
           <th class="text-center tip" data-tip="Очікуваний напрямок на основі actual vs forecast.">Очік.</th>
-          <th class="text-center tip" data-tip="HIT / MISS / NEUTRAL / N/A.">Hit</th>
+          <th class="text-center tip" data-tip="HIT / MISS / NEUTRAL / NO_DATA.">Hit</th>
         </tr></thead>
         <tbody id="events-tbody"><tr><td colspan="9"><span class="loading"></span></td></tr></tbody>
       </table>
@@ -259,21 +259,21 @@
 
     <div class="card p-4 mb-6">
       <h2 class="section-title">
-        <span class="tip" data-tip="Середня зміна ціни SOL через 15 хв після події. По горизонталі — години UTC, по вертикалі — дні тижня.">
-          Середній ret_15m по (день × година UTC)
+        <span class="tip" data-tip="Середня зміна ціни SOL через 15 хв після події. По горизонталі — години Києва, по вертикалі — дні тижня.">
+          Середній ret_15m по (день × година Києва)
         </span>
       </h2>
       <div id="heatmap-container" class="overflow-auto">
         <span class="loading"></span>
       </div>
       <div class="hint mt-2">
-        🟢 середнє зростання · 🔴 середнє падіння · сірий = немає даних · години показані як UTC+0, але з підписом
+        🟢 середнє зростання · 🔴 середнє падіння · сірий = немає даних · години показані за Києвом, наведи для UTC
       </div>
     </div>
 
     <div class="card p-4">
       <h2 class="section-title">
-        <span class="tip" data-tip="Порівняння реакції SOL/BTC/ETH на ту саму подію.">
+        <span class="tip" data-tip="Порівняння реакції SOL/BTC/ETH на ту саму подію. Excess — різниця SOL − BTC. Якщо близько 0 — новина не рухала SOL окремо від ринку.">
           Cross-asset: SOL vs BTC vs ETH
         </span>
       </h2>
@@ -346,12 +346,13 @@
           </dd>
         </div>
         <div>
-          <dt class="font-semibold text-white">Hit / Miss / Neutral / N/A</dt>
+          <dt class="font-semibold text-white">Hit / Miss / Neutral / N/A / NO_DATA</dt>
           <dd class="text-slate-300 ml-4">
             <span class="badge-hit px-2 py-0.5 rounded text-xs">HIT</span> — очікуваний напрямок збігся з фактичним,<br>
             <span class="badge-miss px-2 py-0.5 rounded text-xs">MISS</span> — не збігся,<br>
             <span class="badge-neutral px-2 py-0.5 rounded text-xs">NEUTRAL</span> — очікуваний або фактичний напрямок = flat,<br>
-            <span class="badge-na px-2 py-0.5 rounded text-xs">N/A</span> — немає forecast або actual.
+            <span class="badge-na px-2 py-0.5 rounded text-xs">N/A</span> — немає expected через відсутнє правило,<br>
+            <span class="badge-na px-2 py-0.5 rounded text-xs">—</span> (<b>NO_DATA</b>) — взагалі немає forecast/actual (наприклад, виступи чи GDP/PCE, де ForexFactory не дає actual).
           </dd>
         </div>
         <div>
@@ -359,14 +360,15 @@
           <dd class="text-slate-300 ml-4">
             <code class="bg-slate-700 px-1 rounded">HIT / (HIT + MISS) × 100</code>.
             Показує, наскільки ринок реагує "логічно" на подію.
+            <b>NO_DATA і N/A не враховуються</b>.
             <b>n ≥ 20-30</b> для статистичної значущості.
           </dd>
         </div>
         <div>
-          <dt class="font-semibold text-white">Cross-asset</dt>
+          <dt class="font-semibold text-white">Cross-asset / Excess</dt>
           <dd class="text-slate-300 ml-4">
             Порівняння реакції SOL, BTC, ETH на ту саму подію.
-            Якщо SOL майже завжди рухається в той самий бік, що BTC — SOL просто слідує за ринком.
+            <b>Excess = Avg SOL − Avg BTC</b>. Якщо близько 0 — SOL просто слідує за ринком, а не реагує самостійно.
           </dd>
         </div>
         <div>
@@ -387,6 +389,7 @@
         <li><b>Hit Rate ≈ 50%</b> — новина не має передбачуваного впливу.</li>
         <li><b>Avg +1хв великий, +15хв ≈ 0</b> — це шпилька (spike), заробити неможливо.</li>
         <li><b>Cross-asset кореляція &gt; 70%</b> — SOL просто слідує за BTC.</li>
+        <li><b>Excess ≈ 0</b> — новина не рухає SOL окремо від загального ринку.</li>
       </ul>
     </div>
 
@@ -467,10 +470,8 @@ function fmtBothFull(isoStr) {
   return `${local} <span class="time-utc">(${utc} UTC)</span>`;
 }
 
-// Для stat-last: беремо "2026-09-29 14:21 UTC" → показуємо "29.09 17:21 (14:21 UTC)"
 function fmtStatLast(tsStr) {
   if (!tsStr || tsStr === '—') return '—';
-  // Формат з сервера: "2026-09-29 14:21 UTC"
   const m = tsStr.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
   if (!m) return tsStr;
   const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00Z`;
@@ -505,8 +506,10 @@ const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(3) + '%'
 const clsFor = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
 const clsForDir = d => d === 'up' ? 'up' : d === 'down' ? 'down' : 'flat';
 const badge = imp => `<span class="badge-${imp} px-2 py-0.5 rounded text-xs">${imp}</span>`;
+
 const hitBadge = h => {
   if (!h) return '<span class="badge-na px-2 py-0.5 rounded text-xs">—</span>';
+  if (h === 'NO_DATA') return '<span class="badge-na px-2 py-0.5 rounded text-xs" title="Немає forecast/actual для розрахунку hit">—</span>';
   const cls = {'HIT':'badge-hit','MISS':'badge-miss','NEUTRAL':'badge-neutral','N/A':'badge-na'}[h] || 'badge-na';
   return `<span class="${cls} px-2 py-0.5 rounded text-xs">${h}</span>`;
 };
@@ -607,7 +610,7 @@ async function loadLive() {
 async function loadLiveRecent() {
   const events = await api('/events?limit=30');
   const tbody = document.getElementById('live-recent-tbody');
-  const recent = events.filter(e => e.hit && e.hit !== 'N/A').slice(0, 15);
+  const recent = events.filter(e => e.hit && e.hit !== 'N/A' && e.hit !== 'NO_DATA').slice(0, 15);
   tbody.innerHTML = recent.map(e => `
     <tr class="cursor-pointer" onclick="openEvent(${e.id})">
       <td class="font-mono text-xs">${fmtBothFull(e.time_utc)}</td>
@@ -766,15 +769,18 @@ async function loadDashboard() {
   const denom = (o.hits || 0) + (o.misses || 0);
   if (denom > 0 || (o.n || 0) > 0) {
     document.getElementById('hit-rate-card').style.display = '';
-    const rate = denom > 0 ? (o.hits / denom * 100) : 0;
+    const rate = denom > 0 ? (o.hits / denom * 100) : null;
     document.getElementById('hit-rate-summary').innerHTML = `
       <div>
         <div class="text-sm text-slate-400">Hit Rate</div>
-        <div class="text-3xl font-mono ${rate >= 60 ? 'up' : rate <= 40 ? 'down' : 'flat'}">${rate.toFixed(1)}%</div>
+        <div class="text-3xl font-mono ${rate == null ? 'flat' : rate >= 60 ? 'up' : rate <= 40 ? 'down' : 'flat'}">
+          ${rate == null ? '—' : rate.toFixed(1) + '%'}
+        </div>
+        <div class="hint">${denom > 0 ? `HIT/(HIT+MISS), n=${denom}` : 'Немає даних з forecast/actual'}</div>
       </div>
       <div><div class="text-sm text-slate-400">HIT</div><div class="text-3xl font-mono up">${o.hits || 0}</div></div>
       <div><div class="text-sm text-slate-400">MISS</div><div class="text-3xl font-mono down">${o.misses || 0}</div></div>
-      <div><div class="text-sm text-slate-400">NEUTRAL / N/A</div><div class="text-3xl font-mono flat">${(o.neutrals||0)} / ${(o.na||0)}</div></div>
+      <div><div class="text-sm text-slate-400">NEUTRAL / NO_DATA</div><div class="text-3xl font-mono flat">${(o.neutrals||0)} / ${(o.no_data||0)}</div></div>
     `;
   }
 
@@ -816,15 +822,18 @@ async function loadEvents(importance = null) {
 async function loadImpact() {
   const s = await api('/impact/stats');
   const o = s.overall || {};
+  const denom = (o.hits||0) + (o.misses||0);
+  const rateVal = denom > 0 ? (o.hits / denom * 100) : null;
   document.getElementById('impact-overall').innerHTML = o.n ? `
-    <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-7 gap-4">
       ${metric('Всього (n)', o.n, '', 'Загальна кількість подій')}
-      ${metric('Hit Rate', ((o.hits||0)+(o.misses||0)) > 0 ? ((o.hits/((o.hits||0)+(o.misses||0)))*100).toFixed(1)+'%' : '—',
-              ((o.hits||0)/((o.hits||0)+(o.misses||0)||1)) >= 0.5 ? 'up' : 'down',
-              'HIT / (HIT + MISS) × 100')}
+      ${metric('Hit Rate', rateVal == null ? '—' : rateVal.toFixed(1) + '%',
+              rateVal == null ? 'flat' : rateVal >= 50 ? 'up' : 'down',
+              'HIT / (HIT + MISS) × 100. NO_DATA і N/A не враховуються.')}
       ${metric('HIT', o.hits||0, 'up', 'Прогноз справдився')}
       ${metric('MISS', o.misses||0, 'down', 'Прогноз не справдився')}
       ${metric('NEUTRAL', o.neutrals||0, 'flat', 'У межах порогу')}
+      ${metric('NO_DATA', o.no_data||0, 'flat', 'Немає forecast/actual для розрахунку hit')}
       ${metric('Avg +15хв', fmtPct(o.avg_15m), clsFor(o.avg_15m), 'Середня зміна через 15 хвилин')}
     </div>
   ` : '<p class="text-slate-500">Немає даних</p>';
@@ -903,7 +912,6 @@ async function loadHeatmap() {
   }
 
   function kyivHourLabel(utcHour) {
-    // Показуємо рядок типу "3 (0)" — Київ (UTC)
     const d = new Date(Date.UTC(2026, 0, 1, utcHour, 0, 0));
     const kh = parseInt(d.toLocaleTimeString('uk-UA', {
       timeZone: LOCAL_TZ, hour: '2-digit', hour12: false
@@ -944,12 +952,16 @@ async function loadCrossAsset() {
   const rows = s.cross_asset || [];
 
   document.getElementById('cross-asset-summary').innerHTML = `
-    <div class="grid grid-cols-3 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
       ${metric('Подій з BTC', sum.n_events || 0, '', 'Скільки подій мають impact і для BTC')}
       ${metric('Збіг напрямку', sum.same_direction_as_btc || 0, 'up', 'Скільки разів SOL рухався в той самий бік, що BTC')}
       ${metric('Кореляція', (sum.correlation_pct ?? 0).toFixed(1) + '%',
               (sum.correlation_pct ?? 0) >= 70 ? 'up' : (sum.correlation_pct ?? 0) <= 40 ? 'down' : 'flat',
-              'Скільки % подій SOL рухався в той самий бік, що BTC.')}
+              'Скільки % подій SOL рухався в той самий бік, що BTC')}
+      ${metric('Avg SOL +15хв', fmtPct(sum.avg_sol_ret_15m), clsFor(sum.avg_sol_ret_15m),
+              'Середня зміна SOL через 15 хв після подій')}
+      ${metric('Excess SOL vs BTC', fmtPct(sum.avg_excess_sol_vs_btc), clsFor(sum.avg_excess_sol_vs_btc),
+              'Різниця: SOL − BTC. Якщо близько 0 — новина не рухала SOL окремо від ринку.')}
     </div>
   `;
 
@@ -991,7 +1003,7 @@ async function openEvent(id) {
   `;
 
   if (i && !i.error) {
-    const hit = i.hit || 'N/A';
+    const hit = i.hit || 'NO_DATA';
     body += `<div class="mb-3 p-3 rounded bg-slate-800 flex items-center gap-4 flex-wrap">
       <div><span class="text-slate-400 text-sm">Очікуваний:</span> <span class="${clsForDir(i.expected_dir)} font-mono">${i.expected_dir || '—'}</span></div>
       <div><span class="text-slate-400 text-sm">Фактичний (15хв):</span> <span class="${clsForDir(i.dir_15m)} font-mono">${i.dir_15m || '—'}</span></div>

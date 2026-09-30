@@ -14,16 +14,11 @@ SYMBOLS = ["SOLUSDT", "BTCUSDT", "ETHUSDT"]
 
 
 async def process_all_past_events(limit: int = 500) -> dict:
-    """
-    Проходить по всіх минулих подіях high/medium.
-    Для кожної події та кожного символу (SOL/BTC/ETH) рахує impact.
-    """
     now_iso = datetime.now(timezone.utc).isoformat()
 
     stats = {"processed": 0, "saved": 0, "skipped": 0, "errors": 0}
 
     async with get_db() as db:
-        # Знайти події, де хоч для одного символу немає impact
         cur = await db.execute("""
             SELECT e.* FROM events e
             WHERE e.time_utc < ?
