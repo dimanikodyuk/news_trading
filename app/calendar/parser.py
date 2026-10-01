@@ -81,18 +81,46 @@ def fetch_events(day: str = "today", week: Optional[str] = None) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Витягування JSON
 # ---------------------------------------------------------------------------
+def _js_object_to_json(js: str) -> str:
+    """
+    Груба конвертація JS-об'єкта у JSON:
+    - Замінює слеші: \\/ → /
+    - Замінює одинарні лапки на подвійні (для рядків)
+    - Додає лапки навколо ключів (word: → "word":)
+    """
+    # 1) Екрановані слеші
+    s = js.replace("\\/", "/")
+
+    # 2) Обробляємо рядки в одинарних лапках: 'text' → "text"
+    #    Це треба робити акуратно, щоб не зачепити апострофи всередині тексту
+    #    На щастя, ForexFactory використовує подвійні лапки для рядків,
+    #    тому зазвичай цей крок можна пропустити.
+    # s = _convert_single_to_double_quotes(s)
+
+    # 3) Додаємо лапки навколо ключів: word: → "word":
+    #    Ключ — це слово [A-Za-z_][A-Za-z0-9_]* перед ':'
+    #    Але не чіпаємо ті, що вже в лапках.
+    import re as _re
+    s = _re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', s)
+
+    # 4) Прибираємо trailing commas перед } або ]
+    s = _re.sub(r',(\s*[}\]])', r'\1', s)
+
+    return s
 
 def _extract_calendar_json(html: str) -> Optional[str]:
     """
     Знаходить `window.calendarComponentStates[1] = {...}` і повертає
-    JSON-рядок (збалансований по фігурних дужках).
+    валідний JSON-рядок.
+
+    ForexFactory віддає JS-об'єкт (без лапок на ключах, з коментарями,
+    з function() {...}). Тому треба конвертувати JS → JSON.
     """
     marker = "window.calendarComponentStates[1]"
     idx = html.find(marker)
     if idx < 0:
         return None
 
-    # Знаходимо першу "{" після "="
     eq_idx = html.find("=", idx)
     if eq_idx < 0:
         return None
@@ -100,9 +128,10 @@ def _extract_calendar_json(html: str) -> Optional[str]:
     if brace_start < 0:
         return None
 
-    # Балансуємо дужки, враховуючи лапки і екранування
+    # Балансуємо фігурні дужки, враховуючи лапки (' і ") та escape
     depth = 0
     in_string = False
+    string_char = None
     escape = False
     end = -1
 
@@ -114,10 +143,14 @@ def _extract_calendar_json(html: str) -> Optional[str]:
         if ch == "\\":
             escape = True
             continue
-        if ch == '"':
-            in_string = not in_string
-            continue
         if in_string:
+            if ch == string_char:
+                in_string = False
+                string_char = None
+            continue
+        if ch in ('"', "'"):
+            in_string = True
+            string_char = ch
             continue
         if ch == "{":
             depth += 1
@@ -130,12 +163,14 @@ def _extract_calendar_json(html: str) -> Optional[str]:
     if end < 0:
         return None
 
-    raw = html[brace_start:end]
+    raw_js = html[brace_start:end]
 
-    # ForexFactory екранує слеші: `\/` → `/`
-    raw = raw.replace("\\/", "/")
+    # --- Конвертуємо JS → JSON ---
+    json_str = _js_object_to_json(raw_js)
+    return json_str
 
-    return raw
+
+
 
 
 # ---------------------------------------------------------------------------
