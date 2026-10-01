@@ -84,29 +84,89 @@ def fetch_events(day: str = "today", week: Optional[str] = None) -> list[dict]:
 def _js_object_to_json(js: str) -> str:
     """
     Груба конвертація JS-об'єкта у JSON:
-    - Замінює слеші: \\/ → /
-    - Замінює одинарні лапки на подвійні (для рядків)
-    - Додає лапки навколо ключів (word: → "word":)
+    1. Екрановані слеші: \\/ → /
+    2. Ключі без лапок: word: → "word":
+    3. Одинарні лапки → подвійні (тільки для рядків, не всередині "..."):
+       'text' → "text"
+    4. Trailing commas
     """
+    import re as _re
+
     # 1) Екрановані слеші
     s = js.replace("\\/", "/")
 
-    # 2) Обробляємо рядки в одинарних лапках: 'text' → "text"
-    #    Це треба робити акуратно, щоб не зачепити апострофи всередині тексту
-    #    На щастя, ForexFactory використовує подвійні лапки для рядків,
-    #    тому зазвичай цей крок можна пропустити.
-    # s = _convert_single_to_double_quotes(s)
-
-    # 3) Додаємо лапки навколо ключів: word: → "word":
-    #    Ключ — це слово [A-Za-z_][A-Za-z0-9_]* перед ':'
-    #    Але не чіпаємо ті, що вже в лапках.
-    import re as _re
+    # 2) Ключі без лапок: {word: або ,word: → {"word": або ,"word":
     s = _re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', s)
 
-    # 4) Прибираємо trailing commas перед } або ]
+    # 3) Конвертація одинарних лапок у подвійні (акуратно)
+    s = _single_to_double_quotes(s)
+
+    # 4) Trailing commas перед } або ]
     s = _re.sub(r',(\s*[}\]])', r'\1', s)
 
     return s
+
+
+def _single_to_double_quotes(s: str) -> str:
+    """
+    Замінює 'text' на "text", але не чіпає:
+    - Рядки всередині "..." (подвійні лапки)
+    - Екрановані \'
+    """
+    result = []
+    i = 0
+    n = len(s)
+    in_double = False
+    in_single = False
+    escape = False
+
+    while i < n:
+        ch = s[i]
+
+        if escape:
+            result.append(ch)
+            escape = False
+            i += 1
+            continue
+
+        if ch == "\\":
+            result.append(ch)
+            escape = True
+            i += 1
+            continue
+
+        if in_double:
+            result.append(ch)
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if in_single:
+            if ch == "'":
+                # Кінець рядка в одинарних лапках — закриваємо подвійною
+                result.append('"')
+                in_single = False
+            elif ch == '"':
+                # Лапка всередині '...' — екрануємо
+                result.append('\\"')
+            else:
+                result.append(ch)
+            i += 1
+            continue
+
+        # Не в лапках
+        if ch == '"':
+            in_double = True
+            result.append(ch)
+        elif ch == "'":
+            in_single = True
+            result.append('"')
+        else:
+            result.append(ch)
+        i += 1
+
+    return "".join(result)
 
 def _extract_calendar_json(html: str) -> Optional[str]:
     """
