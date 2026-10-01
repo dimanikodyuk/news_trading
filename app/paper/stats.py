@@ -26,17 +26,50 @@ async def get_account() -> dict:
         """)
         s = await cur.fetchone()
 
-    initial = float(acc["initial_balance"])
-    balance = float(acc["balance"])
-    # open trades «заморожують» частину балансу — додаємо їх для повної equity
-    # (для простоти: equity = balance + сума size_usd відкритих)
-    async with get_db() as db:
+        # --- Розбивка по символах ---
+        cur = await db.execute("""
+            SELECT
+                symbol,
+                COUNT(*) AS total,
+                SUM(CASE WHEN status='OPEN'   THEN 1 ELSE 0 END) AS open_n,
+                SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END) AS closed_n,
+                SUM(CASE WHEN status='CLOSED' AND pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN status='CLOSED' AND pnl <= 0 THEN 1 ELSE 0 END) AS losses,
+                SUM(CASE WHEN status='CLOSED' THEN pnl ELSE 0 END) AS total_pnl,
+                AVG(CASE WHEN status='CLOSED' AND pnl > 0 THEN pnl END) AS avg_win,
+                AVG(CASE WHEN status='CLOSED' AND pnl <= 0 THEN pnl END) AS avg_loss
+            FROM paper_trades
+            GROUP BY symbol
+        """)
+        by_symbol_rows = await cur.fetchall()
+
         cur = await db.execute("""
             SELECT COALESCE(SUM(size_usd + entry_fee), 0) AS frozen
             FROM paper_trades WHERE status='OPEN'
         """)
         frozen = float((await cur.fetchone())["frozen"])
 
+    by_symbol = []
+    for r in by_symbol_rows:
+        wins = r["wins"] or 0
+        losses = r["losses"] or 0
+        closed_n = r["closed_n"] or 0
+        win_rate = (wins / closed_n * 100) if closed_n > 0 else None
+        by_symbol.append({
+            "symbol": r["symbol"],
+            "total": r["total"] or 0,
+            "open": r["open_n"] or 0,
+            "closed": closed_n,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(win_rate, 1) if win_rate is not None else None,
+            "total_pnl": round(r["total_pnl"] or 0, 4),
+            "avg_win": round(r["avg_win"], 4) if r["avg_win"] is not None else None,
+            "avg_loss": round(r["avg_loss"], 4) if r["avg_loss"] is not None else None,
+        })
+
+    initial = float(acc["initial_balance"])
+    balance = float(acc["balance"])
     equity = balance + frozen
     total_pnl = equity - initial
     total_pnl_pct = (total_pnl / initial * 100) if initial > 0 else 0
@@ -61,6 +94,7 @@ async def get_account() -> dict:
         "win_rate": round(win_rate, 1) if win_rate is not None else None,
         "avg_win": round(s["avg_win"], 4) if s["avg_win"] is not None else None,
         "avg_loss": round(s["avg_loss"], 4) if s["avg_loss"] is not None else None,
+        "by_symbol": by_symbol,
     }
 
 

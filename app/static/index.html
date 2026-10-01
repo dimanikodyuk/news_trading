@@ -22,6 +22,9 @@
   .badge-closed { background: #475569; }
   .badge-long { background: #22c55e; }
   .badge-short { background: #ef4444; }
+  .badge-sol { background: #22d3ee; color: #0f172a; }
+  .badge-btc { background: #f59e0b; color: #0f172a; }
+  .badge-eth { background: #8b5cf6; color: #fff; }
   .up { color: #22c55e; }
   .down { color: #ef4444; }
   .flat { color: #94a3b8; }
@@ -395,6 +398,27 @@
       </div>
     </div>
 
+    <!-- По символах -->
+    <div class="card p-4 mb-6" id="paper-by-symbol-card" style="display:none">
+      <h2 class="section-title">
+        <span class="tip" data-tip="Порівняння P&L і win rate по кожному символу окремо.">📊 По символах</span>
+      </h2>
+      <table>
+        <thead><tr>
+          <th>Символ</th>
+          <th class="text-right">Всього</th>
+          <th class="text-right">Відкрито</th>
+          <th class="text-right">Закрито</th>
+          <th class="text-right">W / L</th>
+          <th class="text-right">Win Rate</th>
+          <th class="text-right">P&L</th>
+          <th class="text-right">Avg Win</th>
+          <th class="text-right">Avg Loss</th>
+        </tr></thead>
+        <tbody id="paper-by-symbol-tbody"></tbody>
+      </table>
+    </div>
+
     <div class="card p-4 mb-6">
       <h2 class="section-title">
         <span class="tip" data-tip="Кумулятивний P&L після кожної закритої угоди.">Equity curve (кумулятивний P&L)</span>
@@ -408,6 +432,7 @@
       <table>
         <thead><tr>
           <th>ID</th>
+          <th>Символ</th>
           <th>Подія</th>
           <th class="text-center">Напрямок</th>
           <th class="text-right">Entry</th>
@@ -416,7 +441,7 @@
           <th class="text-right">Розмір</th>
           <th class="text-right">Відкрито</th>
         </tr></thead>
-        <tbody id="paper-open-tbody"><tr><td colspan="8" class="text-slate-500">Немає відкритих угод</td></tr></tbody>
+        <tbody id="paper-open-tbody"><tr><td colspan="9" class="text-slate-500">Немає відкритих угод</td></tr></tbody>
       </table>
     </div>
 
@@ -425,6 +450,7 @@
       <table>
         <thead><tr>
           <th>ID</th>
+          <th>Символ</th>
           <th>Подія</th>
           <th class="text-center">Напрямок</th>
           <th class="text-right">Entry</th>
@@ -433,7 +459,7 @@
           <th class="text-right">P&L %</th>
           <th class="text-right">Закрито</th>
         </tr></thead>
-        <tbody id="paper-closed-tbody"><tr><td colspan="8" class="text-slate-500">Ще немає закритих угод</td></tr></tbody>
+        <tbody id="paper-closed-tbody"><tr><td colspan="9" class="text-slate-500">Ще немає закритих угод</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -503,7 +529,7 @@
         <li>Подія має <b>importance = high</b></li>
         <li>Impact розрахований, і <b>hit = HIT або MISS</b></li>
         <li>Hit rate по цьому title <b>≥ 60%</b> (з n ≥ 5)</li>
-        <li>Відкрито менше ніж <b>3</b> угоди одночасно</li>
+        <li>Відкрито менше ніж <b>6</b> угод одночасно (3 на символ × 2 символи)</li>
       </ol>
       <p class="text-slate-300 text-sm leading-relaxed mt-3">
         <b>Режим:</b> SPOT + LONG-only. Події з `expected_dir = down` <b>пропускаються</b>.<br>
@@ -511,7 +537,10 @@
         <b>Розмір:</b> $10 за угоду.<br>
         <b>Комісія:</b> 0.1% (Bybit spot taker) + slippage 0.05%.<br>
         <b>Вихід:</b> close свічки T+60.<br>
-        <b>Символ:</b> SOLUSDT.
+        <b>Символи:</b> <span class="badge-sol px-2 py-0.5 rounded text-xs">SOLUSDT</span> + <span class="badge-btc px-2 py-0.5 rounded text-xs">BTCUSDT</span>.
+      </p>
+      <p class="text-slate-300 text-sm leading-relaxed mt-3">
+        <b>📊 По символах</b> — порівнює P&L, win rate і avg win/loss для кожного символу окремо. Допомагає визначити, чи BTC дає кращий edge, ніж SOL.
       </p>
     </div>
 
@@ -665,6 +694,13 @@ const dirBadge = d => {
   return '—';
 };
 
+const symbolBadge = s => {
+  if (s === 'SOLUSDT') return '<span class="badge-sol px-2 py-0.5 rounded text-xs">SOL</span>';
+  if (s === 'BTCUSDT') return '<span class="badge-btc px-2 py-0.5 rounded text-xs">BTC</span>';
+  if (s === 'ETHUSDT') return '<span class="badge-eth px-2 py-0.5 rounded text-xs">ETH</span>';
+  return s || '—';
+};
+
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -696,11 +732,8 @@ function zoomChart(factor) {
     try {
       priceChart.zoomScale('x', factor);
       return;
-    } catch (e) {
-      // fallback нижче
-    }
+    } catch (e) {}
   }
-  // Fallback — ручне масштабування
   const xScale = priceChart.scales.x;
   const min = xScale.min ?? 0;
   const max = xScale.max ?? (xScale.labels.length - 1);
@@ -716,10 +749,7 @@ function zoomChart(factor) {
 function resetZoom() {
   if (!priceChart) return;
   if (ZOOM_ENABLED && typeof priceChart.resetZoom === 'function') {
-    try {
-      priceChart.resetZoom();
-      return;
-    } catch (e) {}
+    try { priceChart.resetZoom(); return; } catch (e) {}
   }
   priceChart.options.scales.x.min = undefined;
   priceChart.options.scales.x.max = undefined;
@@ -869,7 +899,6 @@ async function loadPriceChart(hours = null) {
   const tsArray = grouped.map(c => c.ts);
   labelsGlobal = labels;
 
-  // ===== Маркери подій =====
   const markersByLevel = { high: [], medium: [] };
   for (const ev of events) {
     const evTs = new Date(ev.time_utc).getTime();
@@ -883,7 +912,6 @@ async function loadPriceChart(hours = null) {
     else if (ev.importance === 'medium') markersByLevel.medium.push({ idx: bestIdx, ev });
   }
 
-  // Групуємо УСІ події по label (може бути 3 на одну точку)
   eventsByLabelAll = {};
   const allEvents = markersByLevel.high.concat(markersByLevel.medium);
   for (const m of allEvents) {
@@ -892,7 +920,6 @@ async function loadPriceChart(hours = null) {
     eventsByLabelAll[lbl].push(m.ev);
   }
 
-  // ===== Маркери угод =====
   let trades = [];
   try {
     trades = await api(`/paper/trades/range?hours=${currentChartHours}`);
@@ -995,24 +1022,22 @@ async function loadPriceChart(hours = null) {
               const lbl = ctx[0].label;
               const lines = [];
 
-              // Усі трейди на цьому X
               const trade = tradesByLabel[lbl];
               if (trade) {
                 if (trade.kind === 'entry') {
-                  lines.push(`💰 ${trade.direction.toUpperCase()} entry`);
+                  lines.push(`💰 ${trade.direction.toUpperCase()} entry ${trade.symbol}`);
                   lines.push(`Подія: ${trade.event_title}`);
                   lines.push(`Ціна входу: $${trade.entry_price.toFixed(4)}`);
                   lines.push(`Розмір: $${trade.size_usd.toFixed(2)}`);
                 } else {
                   const sign = trade.pnl >= 0 ? '+' : '';
-                  lines.push(`🏁 ${trade.direction.toUpperCase()} exit`);
+                  lines.push(`🏁 ${trade.direction.toUpperCase()} exit ${trade.symbol}`);
                   lines.push(`Подія: ${trade.event_title}`);
                   lines.push(`Ціна виходу: $${trade.exit_price.toFixed(4)}`);
                   lines.push(`P&L: ${sign}$${trade.pnl.toFixed(4)} (${sign}${trade.pnl_pct.toFixed(3)}%)`);
                 }
               }
 
-              // Усі події на цьому X
               const eventsHere = eventsByLabelAll[lbl] || [];
               if (eventsHere.length > 0) {
                 if (eventsHere.length > 1) {
@@ -1285,6 +1310,38 @@ async function loadPaper() {
       acc.avg_win == null ? '—' : '+' + fmtUsd(acc.avg_win);
     document.getElementById('paper-avg-loss').textContent =
       acc.avg_loss == null ? '—' : fmtUsd(acc.avg_loss);
+
+    // --- По символах ---
+    const bySymbolCard = document.getElementById('paper-by-symbol-card');
+    const bySymbolTbody = document.getElementById('paper-by-symbol-tbody');
+    if (acc.by_symbol && acc.by_symbol.length > 0) {
+      bySymbolCard.style.display = '';
+      bySymbolTbody.innerHTML = acc.by_symbol.map(s => `
+        <tr>
+          <td>${symbolBadge(s.symbol)}</td>
+          <td class="text-right font-mono">${s.total}</td>
+          <td class="text-right font-mono text-cyan-400">${s.open}</td>
+          <td class="text-right font-mono">${s.closed}</td>
+          <td class="text-right font-mono">
+            <span class="up">${s.wins}</span> / <span class="down">${s.losses}</span>
+          </td>
+          <td class="text-right font-mono ${s.win_rate == null ? 'flat' : s.win_rate >= 50 ? 'up' : 'down'}">
+            ${s.win_rate == null ? '—' : s.win_rate.toFixed(1) + '%'}
+          </td>
+          <td class="text-right font-mono ${clsFor(s.total_pnl)}">
+            ${s.total_pnl >= 0 ? '+' : ''}${fmtUsd(s.total_pnl)}
+          </td>
+          <td class="text-right font-mono up">
+            ${s.avg_win == null ? '—' : '+' + fmtUsd(s.avg_win)}
+          </td>
+          <td class="text-right font-mono down">
+            ${s.avg_loss == null ? '—' : fmtUsd(s.avg_loss)}
+          </td>
+        </tr>
+      `).join('');
+    } else {
+      bySymbolCard.style.display = 'none';
+    }
   }
 
   const curve = await api('/paper/equity_curve');
@@ -1334,7 +1391,7 @@ async function loadPaper() {
 
   const openTbody = document.getElementById('paper-open-tbody');
   if (openTrades.length === 0) {
-    openTbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">Немає відкритих угод</td></tr>';
+    openTbody.innerHTML = '<tr><td colspan="9" class="text-slate-500">Немає відкритих угод</td></tr>';
   } else {
     openTbody.innerHTML = openTrades.map(t => {
       const current = currentPrices[t.symbol];
@@ -1354,6 +1411,7 @@ async function loadPaper() {
       return `
         <tr>
           <td class="font-mono text-xs text-slate-500">${t.id}</td>
+          <td>${symbolBadge(t.symbol)}</td>
           <td class="text-cyan-400">${t.event_title}</td>
           <td class="text-center">${dirBadge(t.direction)}</td>
           <td class="text-right font-mono">${fmtUsd4(t.entry_price)}</td>
@@ -1368,7 +1426,7 @@ async function loadPaper() {
 
   const closedTbody = document.getElementById('paper-closed-tbody');
   if (closedTrades.length === 0) {
-    closedTbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">Ще немає закритих угод</td></tr>';
+    closedTbody.innerHTML = '<tr><td colspan="9" class="text-slate-500">Ще немає закритих угод</td></tr>';
   } else {
     closedTbody.innerHTML = closedTrades.map(t => {
       const pnlSign = (t.pnl || 0) >= 0 ? '+' : '';
@@ -1376,6 +1434,7 @@ async function loadPaper() {
       return `
         <tr>
           <td class="font-mono text-xs text-slate-500">${t.id}</td>
+          <td>${symbolBadge(t.symbol)}</td>
           <td class="text-cyan-400">${t.event_title}</td>
           <td class="text-center">${dirBadge(t.direction)}</td>
           <td class="text-right font-mono">${fmtUsd4(t.entry_price)}</td>
