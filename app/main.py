@@ -443,6 +443,31 @@ async def api_paper_run():
     """Ручний запуск paper engine (для тесту)."""
     return await process_paper_engine()
 
+@app.get("/paper/trades/range")
+async def api_paper_trades_range(hours: int = 24):
+    """Повертає угоди, що перетинаються з діапазоном [now-hours, now]."""
+    import time as _t
+    now_ms = int(_t.time() * 1000)
+    from_ms = now_ms - hours * 60 * 60 * 1000
+
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT
+                pt.id, pt.event_id, pt.symbol, pt.direction,
+                pt.entry_ts, pt.entry_price, pt.entry_fee,
+                pt.exit_ts, pt.exit_price, pt.exit_fee,
+                pt.size_usd, pt.pnl, pt.pnl_pct, pt.status,
+                pt.opened_at, pt.closed_at,
+                e.title AS event_title, e.time_utc AS event_time
+            FROM paper_trades pt
+            JOIN events e ON e.id = pt.event_id
+            WHERE pt.entry_ts >= ?
+               OR (pt.exit_ts IS NOT NULL AND pt.exit_ts >= ?)
+            ORDER BY pt.entry_ts ASC
+        """, (from_ms, from_ms))
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
 
 # ============================================================================
 # API: history loading (опційно)

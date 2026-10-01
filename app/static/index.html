@@ -6,6 +6,8 @@
 <title>News Trading Bot</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 <style>
   body { background: #0f172a; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; }
   .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; }
@@ -76,7 +78,6 @@
     font-size: 0.75rem;
   }
 
-  /* Перемикач символів */
   .symbol-tab {
     padding: 0.4rem 0.9rem;
     border-radius: 0.375rem;
@@ -92,6 +93,29 @@
   .symbol-tab.btc.active { background: #f59e0b; color: #0f172a; border-color: #f59e0b; }
   .symbol-tab.eth.active { background: #8b5cf6; color: #fff; border-color: #8b5cf6; }
   .symbol-tab.all.active { background: #64748b; color: #fff; border-color: #64748b; }
+
+  /* Кнопки zoom */
+  .zoom-btn {
+    position: absolute;
+    z-index: 10;
+    width: 32px; height: 32px;
+    border-radius: 0.375rem;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .zoom-btn:hover { background: #334155; }
+  .zoom-btn.reset { width: auto; padding: 0 12px; font-size: 0.75rem; }
+
+  .chart-container { position: relative; }
+  .chart-container .zoom-controls {
+    position: absolute;
+    top: 10px; right: 10px;
+    display: flex; gap: 4px;
+  }
 </style>
 </head>
 <body class="min-h-screen">
@@ -181,17 +205,31 @@
     <div class="card p-4 mb-6">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h2 class="section-title mb-0">
-          <span class="tip" data-tip="Ціна SOLUSDT з маркерами економічних подій. Червоні — high, жовті — medium.">SOLUSDT — графік з подіями</span>
+          <span class="tip" data-tip="Ціна SOLUSDT з маркерами економічних подій і точками входу/виходу paper-угод. Колесо мишки — zoom, drag — pan.">SOLUSDT — графік з подіями та угодами</span>
         </h2>
-        <div class="flex gap-2">
-          <button class="tab active" onclick="loadPriceChart(1)">1 год</button>
-          <button class="tab" onclick="loadPriceChart(6)">6 год</button>
+        <div class="flex gap-2 flex-wrap">
+          <button class="tab" onclick="loadPriceChart(0.25)">15 хв</button>
+          <button class="tab" onclick="loadPriceChart(1)">1 год</button>
+          <button class="tab active" onclick="loadPriceChart(6)">6 год</button>
           <button class="tab" onclick="loadPriceChart(24)">24 год</button>
           <button class="tab" onclick="loadPriceChart(168)">7 днів</button>
         </div>
       </div>
-      <canvas id="price-chart" height="100"></canvas>
-      <div class="hint mt-2">🔴 high · 🟡 medium · клік на маркері → деталі події · час на осі X — Київ</div>
+      <div class="chart-container">
+        <div class="zoom-controls">
+          <button class="zoom-btn" onclick="zoomChart(1.3)" title="Наблизити">+</button>
+          <button class="zoom-btn" onclick="zoomChart(1/1.3)" title="Віддалити">−</button>
+          <button class="zoom-btn reset" onclick="resetZoom()" title="Скинути zoom">Reset</button>
+        </div>
+        <canvas id="price-chart" height="100"></canvas>
+      </div>
+      <div class="hint mt-2">
+        🔴 high · 🟡 medium ·
+        <span style="color:#22c55e">▲ LONG entry</span> ·
+        <span style="color:#ef4444">▼ SHORT entry</span> ·
+        ◆ exit ·
+        <b>колесо мишки</b> — zoom · <b>drag</b> — pan · <b>подвійний клік</b> — reset
+      </div>
     </div>
 
     <div class="card p-4 mb-6" id="overall-impact-card" style="display:none">
@@ -444,6 +482,20 @@
     <h1 class="text-2xl font-bold mb-6">Довідка</h1>
 
     <div class="card p-6 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">📈 Графік: zoom і маркери угод</h2>
+      <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside ml-4">
+        <li><b>Колесо мишки</b> — zoom in/out</li>
+        <li><b>Drag</b> (затиснути і тягнути) — переміщення</li>
+        <li><b>Подвійний клік</b> — скинути zoom</li>
+        <li><b>Кнопки + / − / Reset</b> — у правому верхньому куті графіка</li>
+        <li><b>▲ зелений</b> — LONG entry (вхід у лонг)</li>
+        <li><b>▼ червоний</b> — SHORT entry (вхід у шорт)</li>
+        <li><b>◆ ромб</b> — exit (колір = P&L: зелений якщо +, червоний якщо −)</li>
+        <li>Наведи на маркер — побачиш деталі угоди</li>
+      </ul>
+    </div>
+
+    <div class="card p-6 mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">💰 Paper Trading — як працює</h2>
       <p class="text-slate-300 text-sm leading-relaxed mb-3">
         Автоматично відкриває віртуальні угоди, коли:
@@ -455,14 +507,12 @@
         <li>Відкрито менше ніж <b>3</b> угоди одночасно</li>
       </ol>
       <p class="text-slate-300 text-sm leading-relaxed mt-3">
-        <b>Вхід:</b> close свічки T+1, у напрямку <code class="bg-slate-700 px-1 rounded">expected_dir</code>.<br>
+        <b>Режим:</b> SPOT + LONG-only. Події з `expected_dir = down` <b>пропускаються</b> — на споті шортити неможливо.<br>
+        <b>Вхід:</b> close свічки T+1.<br>
         <b>Розмір:</b> $10 за угоду.<br>
-        <b>Комісія:</b> 0.1% (Bybit taker) + slippage 0.05%.<br>
+        <b>Комісія:</b> 0.1% (Bybit spot taker) + slippage 0.05%.<br>
         <b>Вихід:</b> close свічки T+60.<br>
         <b>Символ:</b> SOLUSDT.
-      </p>
-      <p class="text-slate-300 text-sm leading-relaxed mt-3">
-        Усі угоди — <b>віртуальні</b>.
       </p>
     </div>
 
@@ -470,69 +520,24 @@
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Перемикач символів на вкладці «Вплив»</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
         Кнопки <b>SOL / BTC / ETH / Всі</b> фільтрують статистику за символом.<br><br>
-        <b>SOL</b> — показує тільки реакцію SOLUSDT на події. Це <b>правильна картина</b> для торгівлі на SOL.<br>
+        <b>SOL</b> — показує тільки реакцію SOLUSDT. Це <b>правильна картина</b> для торгівлі на SOL.<br>
         <b>BTC / ETH</b> — для порівняння.<br>
-        <b>Всі (разом)</b> — середнє по всіх трьох. Може вводити в оману, бо BTC рухається сильніше за SOL, і середнє буде завищеним.
+        <b>Всі (разом)</b> — середнє по всіх трьох.
       </p>
     </div>
 
     <div class="card p-6 mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Про час</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
-        Усі розрахунки (impact, вікна T+1, T+5, T+15, T+30, T+60) ведуться в <b>UTC</b>.<br>
+        Усі розрахунки ведуться в <b>UTC</b>.<br>
         У веб-інтерфейсі час показується у <b>Europe/Kyiv</b>, UTC — у дужках.
       </p>
-    </div>
-
-    <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Основні терміни</h2>
-      <dl class="space-y-3 text-sm">
-        <div>
-          <dt class="font-semibold text-white">Baseline (T-1)</dt>
-          <dd class="text-slate-300 ml-4">Ціна за 1 хвилину ДО події.</dd>
-        </div>
-        <div>
-          <dt class="font-semibold text-white">Напрямок (Direction)</dt>
-          <dd class="text-slate-300 ml-4">
-            <span class="up">up</span> / <span class="down">down</span> / <span class="flat">flat</span>
-          </dd>
-        </div>
-        <div>
-          <dt class="font-semibold text-white">Очікуваний напрямок (Expected)</dt>
-          <dd class="text-slate-300 ml-4">
-            Куди "мала би" піти ціна на основі <b>actual vs forecast</b>.
-          </dd>
-        </div>
-        <div>
-          <dt class="font-semibold text-white">Hit / Miss / Neutral / N/A / NO_DATA</dt>
-          <dd class="text-slate-300 ml-4">
-            <span class="badge-hit px-2 py-0.5 rounded text-xs">HIT</span> — справдився,<br>
-            <span class="badge-miss px-2 py-0.5 rounded text-xs">MISS</span> — не справдився,<br>
-            <span class="badge-neutral px-2 py-0.5 rounded text-xs">NEUTRAL</span> — у межах порогу,<br>
-            <span class="badge-na px-2 py-0.5 rounded text-xs">N/A</span> — немає правила,<br>
-            <span class="badge-na px-2 py-0.5 rounded text-xs">—</span> (<b>NO_DATA</b>) — немає forecast/actual.
-          </dd>
-        </div>
-        <div>
-          <dt class="font-semibold text-white">Hit Rate</dt>
-          <dd class="text-slate-300 ml-4">
-            <code class="bg-slate-700 px-1 rounded">HIT / (HIT + MISS) × 100</code>.
-            NO_DATA і N/A не враховуються.
-          </dd>
-        </div>
-        <div>
-          <dt class="font-semibold text-white">Excess SOL vs BTC</dt>
-          <dd class="text-slate-300 ml-4">
-            Avg SOL − Avg BTC. Якщо близько 0 — SOL просто слідує за ринком.
-          </dd>
-        </div>
-      </dl>
     </div>
 
     <div class="card p-6">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Джерела даних</h2>
       <ul class="text-sm text-slate-300 space-y-2">
-        <li><b>Новини:</b> ForexFactory (парсинг HTML).</li>
+        <li><b>Новини:</b> ForexFactory.</li>
         <li><b>Ціни:</b> Bybit Spot API (WebSocket + REST).</li>
         <li><b>Символи:</b> SOLUSDT, BTCUSDT, ETHUSDT.</li>
       </ul>
@@ -551,6 +556,13 @@
 </div>
 
 <script>
+// ==================== REGISTER ZOOM PLUGIN ====================
+if (window.Chart && window.ChartZoom) {
+  Chart.register(window.ChartZoom);
+} else if (window.Chart && window.chartjsPluginZoom) {
+  Chart.register(window.chartjsPluginZoom);
+}
+
 // ==================== TIME FORMATTING ====================
 const LOCAL_TZ = 'Europe/Kyiv';
 
@@ -558,14 +570,6 @@ function parseUtc(isoStr) {
   if (!isoStr) return null;
   if (!isoStr.endsWith('Z') && !isoStr.includes('+')) isoStr += 'Z';
   return new Date(isoStr);
-}
-
-function fmtLocalTime(isoStr) {
-  const d = parseUtc(isoStr);
-  if (!d) return '—';
-  return d.toLocaleTimeString('uk-UA', {
-    timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false
-  });
 }
 
 function fmtBoth(isoStr) {
@@ -636,7 +640,7 @@ const badge = imp => `<span class="badge-${imp} px-2 py-0.5 rounded text-xs">${i
 
 const hitBadge = h => {
   if (!h) return '<span class="badge-na px-2 py-0.5 rounded text-xs">—</span>';
-  if (h === 'NO_DATA') return '<span class="badge-na px-2 py-0.5 rounded text-xs" title="Немає forecast/actual для розрахунку hit">—</span>';
+  if (h === 'NO_DATA') return '<span class="badge-na px-2 py-0.5 rounded text-xs" title="Немає forecast/actual">—</span>';
   const cls = {'HIT':'badge-hit','MISS':'badge-miss','NEUTRAL':'badge-neutral','N/A':'badge-na'}[h] || 'badge-na';
   return `<span class="${cls} px-2 py-0.5 rounded text-xs">${h}</span>`;
 };
@@ -664,24 +668,30 @@ function metric(label, value, cls, tip) {
 let priceChart = null;
 let hitChart = null;
 let equityChart = null;
-let currentChartHours = 1;
+let currentChartHours = 6;
 let currentPrices = {};
-let impactSymbol = 'SOLUSDT'; // перемикач символу на вкладці "Вплив"
+let impactSymbol = 'SOLUSDT';
 
-// ==================== IMPACT SYMBOL SWITCH ====================
-function switchImpactSymbol(symbol, el) {
-  impactSymbol = symbol;
-  document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
+// ==================== CHART ZOOM CONTROLS ====================
+function zoomChart(factor) {
+  if (!priceChart) return;
+  const xScale = priceChart.scales.x;
+  const min = xScale.min;
+  const max = xScale.max;
+  const center = (min + max) / 2;
+  const halfRange = (max - min) / 2 / factor;
+  const newMin = Math.max(0, center - halfRange);
+  const newMax = Math.min(xScale.labels.length - 1, center + halfRange);
+  priceChart.options.scales.x.min = newMin;
+  priceChart.options.scales.x.max = newMax;
+  priceChart.update('none');
+}
 
-  const label = document.getElementById('impact-symbol-label');
-  if (symbol) {
-    label.textContent = symbol;
-  } else {
-    label.textContent = 'SOL + BTC + ETH (разом)';
-  }
-
-  loadImpact();
+function resetZoom() {
+  if (!priceChart) return;
+  priceChart.options.scales.x.min = undefined;
+  priceChart.options.scales.x.max = undefined;
+  priceChart.update('none');
 }
 
 // ==================== LIVE ====================
@@ -780,24 +790,28 @@ async function loadLiveRecent() {
 async function loadPriceChart(hours = null) {
   if (hours !== null) currentChartHours = hours;
 
+  // підсвітка кнопок
   document.querySelectorAll('#tab-dashboard button.tab').forEach(b => {
     b.classList.remove('active');
     const txt = b.textContent.trim();
-    if ((currentChartHours === 1 && txt === '1 год') ||
-        (currentChartHours === 6 && txt === '6 год') ||
-        (currentChartHours === 24 && txt === '24 год') ||
-        (currentChartHours === 168 && txt === '7 днів')) {
-      b.classList.add('active');
-    }
+    const match =
+      (currentChartHours === 0.25 && txt === '15 хв') ||
+      (currentChartHours === 1 && txt === '1 год') ||
+      (currentChartHours === 6 && txt === '6 год') ||
+      (currentChartHours === 24 && txt === '24 год') ||
+      (currentChartHours === 168 && txt === '7 днів');
+    if (match) b.classList.add('active');
   });
 
   const data = await api(`/prices/range?hours=${currentChartHours}&symbol=SOLUSDT`);
   const candles = data.candles;
   const events = data.events;
 
+  // Для великих проміжків — групуємо; для малих — ні
   let step = 1;
   if (currentChartHours >= 168) step = 30;
   else if (currentChartHours >= 24) step = 5;
+  // 15 хв / 1 год / 6 год — крок 1 (показуємо сирі хвилинні свічки)
 
   const grouped = [];
   for (let i = 0; i < candles.length; i += step) {
@@ -808,6 +822,12 @@ async function loadPriceChart(hours = null) {
 
   const labels = grouped.map(c => {
     const d = new Date(c.ts);
+    if (currentChartHours < 1) {
+      // 15 хв — показуємо з секундами (мм:сс)
+      return d.toLocaleTimeString('uk-UA', {
+        timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+      });
+    }
     return currentChartHours >= 24
       ? d.toLocaleString('uk-UA', {
           timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
@@ -818,7 +838,9 @@ async function loadPriceChart(hours = null) {
         });
   });
   const prices = grouped.map(c => c.close);
+  const tsArray = grouped.map(c => c.ts);
 
+  // ===== Маркери подій =====
   const markersByLevel = { high: [], medium: [] };
   for (const ev of events) {
     const evTs = new Date(ev.time_utc).getTime();
@@ -836,21 +858,95 @@ async function loadPriceChart(hours = null) {
   for (const m of markersByLevel.high) eventsByLabel[labels[m.idx]] = m.ev;
   for (const m of markersByLevel.medium) eventsByLabel[labels[m.idx]] = m.ev;
 
+  // ===== Маркери угод =====
+  let trades = [];
+  try {
+    trades = await api(`/paper/trades/range?hours=${currentChartHours}`);
+  } catch (_) {}
+
+  const longEntries = [];
+  const shortEntries = [];
+  const exits = [];
+  const tradesByLabel = {};
+
+  for (const t of trades) {
+    // Entry
+    const entryIdx = findIdxByTs(tsArray, t.entry_ts);
+    if (entryIdx >= 0) {
+      const point = { x: labels[entryIdx], y: prices[entryIdx], trade: t, kind: 'entry' };
+      if (t.direction === 'long') longEntries.push(point);
+      else shortEntries.push(point);
+      tradesByLabel[labels[entryIdx]] = { ...t, kind: 'entry' };
+    }
+    // Exit (якщо закрита)
+    if (t.exit_ts) {
+      const exitIdx = findIdxByTs(tsArray, t.exit_ts);
+      if (exitIdx >= 0) {
+        exits.push({
+          x: labels[exitIdx],
+          y: prices[exitIdx],
+          trade: t,
+          kind: 'exit',
+          pnl: t.pnl
+        });
+        // не перезаписуємо, якщо вже є entry на цій точці
+        if (!tradesByLabel[labels[exitIdx]]) {
+          tradesByLabel[labels[exitIdx]] = { ...t, kind: 'exit' };
+        }
+      }
+    }
+  }
+
   const datasets = [
     {
       label: 'SOLUSDT', data: prices,
       borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)',
-      borderWidth: 2, tension: 0.2, pointRadius: 0, fill: true, order: 2,
+      borderWidth: 2, tension: 0.2, pointRadius: 0, fill: true, order: 5,
     },
     {
       label: 'High', data: markersByLevel.high.map(m => ({ x: labels[m.idx], y: prices[m.idx] })),
       backgroundColor: '#dc2626', borderColor: '#fff', borderWidth: 1,
-      pointRadius: 8, pointHoverRadius: 12, showLine: false, order: 1,
+      pointRadius: 6, pointHoverRadius: 10, showLine: false, order: 4,
     },
     {
       label: 'Medium', data: markersByLevel.medium.map(m => ({ x: labels[m.idx], y: prices[m.idx] })),
       backgroundColor: '#f59e0b', borderColor: '#fff', borderWidth: 1,
-      pointRadius: 6, pointHoverRadius: 10, showLine: false, order: 1,
+      pointRadius: 4, pointHoverRadius: 8, showLine: false, order: 4,
+    },
+    {
+      label: 'LONG entry',
+      data: longEntries.map(p => ({ x: p.x, y: p.y })),
+      backgroundColor: '#22c55e',
+      borderColor: '#ffffff',
+      borderWidth: 1.5,
+      pointRadius: 9,
+      pointHoverRadius: 13,
+      pointStyle: 'triangle',
+      rotation: 0,
+      showLine: false, order: 1,
+    },
+    {
+      label: 'SHORT entry',
+      data: shortEntries.map(p => ({ x: p.x, y: p.y })),
+      backgroundColor: '#ef4444',
+      borderColor: '#ffffff',
+      borderWidth: 1.5,
+      pointRadius: 9,
+      pointHoverRadius: 13,
+      pointStyle: 'triangle',
+      rotation: 180,
+      showLine: false, order: 1,
+    },
+    {
+      label: 'Exit',
+      data: exits.map(p => ({ x: p.x, y: p.y })),
+      backgroundColor: exits.map(p => (p.pnl >= 0 ? '#22c55e' : '#ef4444')),
+      borderColor: '#ffffff',
+      borderWidth: 1.5,
+      pointRadius: 8,
+      pointHoverRadius: 12,
+      pointStyle: 'rectRot',
+      showLine: false, order: 2,
     },
   ];
 
@@ -860,38 +956,96 @@ async function loadPriceChart(hours = null) {
     data: { labels, datasets },
     options: {
       responsive: true,
-      interaction: { mode: 'nearest', intersect: false },
+      interaction: { mode: 'nearest', intersect: true },
       plugins: {
-        legend: { labels: { color: '#e2e8f0' } },
+        legend: {
+          labels: {
+            color: '#e2e8f0',
+            filter: (item) => item.text !== 'High' && item.text !== 'Medium',
+          }
+        },
         tooltip: {
           callbacks: {
-            afterBody: (ctx) => {
-              const lbl = ctx[0].label;
+            label: (ctx) => {
+              const lbl = ctx.label;
+              const trade = tradesByLabel[lbl];
               const ev = eventsByLabel[lbl];
-              if (!ev) return '';
-              const lines = [`📌 ${ev.title}`, `Важливість: ${ev.importance}`];
-              if (ev.ret_15m != null) lines.push(`Ret +15хв: ${ev.ret_15m.toFixed(3)}%`);
-              if (ev.hit) lines.push(`Результат: ${ev.hit}`);
+              const lines = [];
+
+              if (ctx.dataset.label === 'SOLUSDT') {
+                lines.push(`Ціна: $${ctx.parsed.y.toFixed(4)}`);
+              }
+              if (trade) {
+                if (trade.kind === 'entry') {
+                  lines.push(`💰 ${trade.direction.toUpperCase()} entry`);
+                  lines.push(`Подія: ${trade.event_title}`);
+                  lines.push(`Ціна входу: $${trade.entry_price.toFixed(4)}`);
+                  lines.push(`Розмір: $${trade.size_usd.toFixed(2)}`);
+                } else {
+                  const sign = trade.pnl >= 0 ? '+' : '';
+                  lines.push(`🏁 ${trade.direction.toUpperCase()} exit`);
+                  lines.push(`Подія: ${trade.event_title}`);
+                  lines.push(`Ціна виходу: $${trade.exit_price.toFixed(4)}`);
+                  lines.push(`P&L: ${sign}$${trade.pnl.toFixed(4)} (${sign}${trade.pnl_pct.toFixed(3)}%)`);
+                }
+              }
+              if (ev) {
+                lines.push(`📌 ${ev.title}`);
+                if (ev.ret_15m != null) lines.push(`Ret +15хв: ${ev.ret_15m.toFixed(3)}%`);
+                if (ev.hit) lines.push(`Hit: ${ev.hit}`);
+              }
               return lines;
             }
           }
-        }
+        },
+        zoom: {
+          pan: { enabled: true, mode: 'x' },
+          zoom: {
+            wheel: { enabled: true, speed: 0.1 },
+            pinch: { enabled: true },
+            mode: 'x',
+          },
+          limits: { x: { minRange: 10 } },
+        },
       },
       onClick: (evt, elements) => {
         if (elements.length === 0) return;
         const el = elements[0];
         const lbl = labels[el.index];
+        const trade = tradesByLabel[lbl];
+        if (trade) {
+          openEvent(trade.event_id);
+          return;
+        }
         const ev = eventsByLabel[lbl];
         if (ev) openEvent(ev.id);
       },
       scales: {
-        x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' },
-             title: { display: true, text: 'Час (Київ)', color: '#94a3b8' } },
-        y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
-             title: { display: true, text: 'Ціна, USD', color: '#94a3b8' } },
+        x: {
+          ticks: { color: '#94a3b8', maxTicksLimit: 12, autoSkip: true },
+          grid: { color: '#334155' },
+          title: { display: true, text: 'Час (Київ)', color: '#94a3b8' }
+        },
+        y: {
+          ticks: { color: '#94a3b8' },
+          grid: { color: '#334155' },
+          title: { display: true, text: 'Ціна, USD', color: '#94a3b8' }
+        },
       }
     }
   });
+}
+
+function findIdxByTs(tsArray, targetTs) {
+  if (!tsArray || tsArray.length === 0 || !targetTs) return -1;
+  let bestIdx = -1, bestDist = Infinity;
+  for (let i = 0; i < tsArray.length; i++) {
+    const dist = Math.abs(tsArray[i] - targetTs);
+    if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+  }
+  // допускаємо відхилення до 2 хв
+  if (bestDist > 2 * 60 * 1000) return -1;
+  return bestIdx;
 }
 
 // ==================== DASHBOARD ====================
@@ -916,7 +1070,7 @@ async function loadDashboard() {
 
   await loadPriceChart();
 
-  const istats = await api('/impact/stats');
+  const istats = await api('/impact/stats?symbol=SOLUSDT');
   const o = istats.overall || {};
   const denom = (o.hits || 0) + (o.misses || 0);
   if (denom > 0 || (o.n || 0) > 0) {
@@ -924,7 +1078,7 @@ async function loadDashboard() {
     const rate = denom > 0 ? (o.hits / denom * 100) : null;
     document.getElementById('hit-rate-summary').innerHTML = `
       <div>
-        <div class="text-sm text-slate-400">Hit Rate</div>
+        <div class="text-sm text-slate-400">Hit Rate (SOL)</div>
         <div class="text-3xl font-mono ${rate == null ? 'flat' : rate >= 60 ? 'up' : rate <= 40 ? 'down' : 'flat'}">
           ${rate == null ? '—' : rate.toFixed(1) + '%'}
         </div>
@@ -949,7 +1103,6 @@ async function loadDashboard() {
     `;
   }
 
-  // Оновлюємо nav equity
   try {
     const acc = await api('/paper/account');
     if (!acc.error) {
@@ -981,6 +1134,17 @@ async function loadEvents(importance = null) {
 }
 
 // ==================== IMPACT ====================
+function switchImpactSymbol(symbol, el) {
+  impactSymbol = symbol;
+  document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+
+  const label = document.getElementById('impact-symbol-label');
+  label.textContent = symbol || 'SOL + BTC + ETH (разом)';
+
+  loadImpact();
+}
+
 async function loadImpact() {
   const url = impactSymbol
     ? `/impact/stats?symbol=${impactSymbol}`
@@ -994,11 +1158,11 @@ async function loadImpact() {
       ${metric('Всього (n)', o.n, '', 'Загальна кількість подій')}
       ${metric('Hit Rate', rateVal == null ? '—' : rateVal.toFixed(1) + '%',
               rateVal == null ? 'flat' : rateVal >= 50 ? 'up' : 'down',
-              'HIT / (HIT + MISS) × 100. NO_DATA і N/A не враховуються.')}
+              'HIT / (HIT + MISS) × 100')}
       ${metric('HIT', o.hits||0, 'up', 'Прогноз справдився')}
       ${metric('MISS', o.misses||0, 'down', 'Прогноз не справдився')}
       ${metric('NEUTRAL', o.neutrals||0, 'flat', 'У межах порогу')}
-      ${metric('NO_DATA', o.no_data||0, 'flat', 'Немає forecast/actual для розрахунку hit')}
+      ${metric('NO_DATA', o.no_data||0, 'flat', 'Немає forecast/actual')}
       ${metric('Avg +15хв', fmtPct(o.avg_15m), clsFor(o.avg_15m), 'Середня зміна через 15 хвилин')}
     </div>
   ` : '<p class="text-slate-500">Немає даних</p>';
@@ -1142,11 +1306,12 @@ async function loadPaper() {
       let liveCls = 'flat';
       if (current && t.entry_price) {
         const qty = t.size_usd / t.entry_price;
-        const gross = qty * current;
-        const exitFee = gross * 0.001;
-        const net = gross - exitFee;
-        const cost = t.size_usd + t.entry_fee;
-        const pnl = net - cost;
+        let pnl;
+        if (t.direction === 'long') {
+          pnl = qty * (current - t.entry_price) - t.entry_fee;
+        } else {
+          pnl = qty * (t.entry_price - current) - t.entry_fee;
+        }
         livePnl = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(4);
         liveCls = clsFor(pnl);
       }
@@ -1387,6 +1552,7 @@ async function runRecompute() {
         if (msg.type === 'paper_updated') {
           const tab = document.querySelector('.tab.active');
           if (tab && tab.dataset.tab === 'paper') loadPaper();
+          if (tab && tab.dataset.tab === 'dashboard') loadPriceChart();
         }
         if (msg.type === 'live_update') {
           const liveTab = document.getElementById('tab-live');
