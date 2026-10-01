@@ -1,12 +1,19 @@
 """
 Парсер економічного календаря ForexFactory через JSON у HTML.
 
-ForexFactory вбудовує дані подій як JSON у змінну
+ForexFactory вбудовує дані подій як JS-об'єкт у змінну
 `window.calendarComponentStates[1]`. Це дає нам:
-- actual, forecast, previous, revision (усе, чого не було в HTML)
-- impactClass (high/medium/low) — точніше за HTML-парсинг
-- dateline (unix timestamp) — точний час
-- actualBetterWorse — ForexFactory каже, чи actual кращий за forecast
+- actual, forecast, previous, revision
+- impactClass (high/medium/low)
+- dateline (unix timestamp)
+- actualBetterWorse
+
+JS-об'єкт не є валідним JSON, тому його конвертуємо:
+1. Object.freeze(X) → X (з балансуванням дужок)
+2. Прибираємо \\/
+3. Додаємо лапки навколо ключів
+4. Замінюємо одинарні лапки на подвійні
+5. Прибираємо trailing commas
 
 Parser v5 (JSON-based).
 """
@@ -32,14 +39,11 @@ HEADERS = {
 }
 
 
-def fetch_events(day: str = "today", week: Optional[str] = None) -> list[dict]:
-    """
-    Повертає список подій з ForexFactory.
+# ---------------------------------------------------------------------------
+# Публічний API
+# ---------------------------------------------------------------------------
 
-    Аргументи:
-        day:  'today' | 'tomorrow' | 'yesterday'
-        week: 'this' | 'last' | 'next' (якщо задано — day ігнорується)
-    """
+def fetch_events(day: str = "today", week: Optional[str] = None) -> list[dict]:
     params: dict = {}
     if week:
         params["week"] = week
@@ -52,7 +56,6 @@ def fetch_events(day: str = "today", week: Optional[str] = None) -> list[dict]:
     )
     r.raise_for_status()
 
-    # --- Витягуємо JSON з window.calendarComponentStates[1] ---
     raw_json = _extract_calendar_json(r.text)
     if raw_json is None:
         logger.error("Не вдалось знайти calendarComponentStates у HTML")
@@ -62,14 +65,19 @@ def fetch_events(day: str = "today", week: Optional[str] = None) -> list[dict]:
         data = json.loads(raw_json)
     except json.JSONDecodeError as ex:
         logger.error(f"Помилка парсингу JSON: {ex}")
+        try:
+            pos = ex.pos
+            frag = raw_json[max(0, pos - 100):pos + 100]
+            logger.error(f"Позиція {pos}: ...{frag}...")
+        except Exception:
+            pass
         return []
 
     days = data.get("days", [])
     events: list[dict] = []
 
     for day_obj in days:
-        day_events = day_obj.get("events", [])
-        for ev in day_events:
+        for ev in day_obj.get("events", []):
             parsed = _parse_event(ev)
             if parsed is not None:
                 events.append(parsed)
@@ -79,103 +87,10 @@ def fetch_events(day: str = "today", week: Optional[str] = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Витягування JSON
+# Витягування JSON з HTML
 # ---------------------------------------------------------------------------
-def _js_object_to_json(js: str) -> str:
-    """
-    Груба конвертація JS-об'єкта у JSON:
-    1. Екрановані слеші: \\/ → /
-    2. Ключі без лапок: word: → "word":
-    3. Одинарні лапки → подвійні (тільки для рядків, не всередині "..."):
-       'text' → "text"
-    4. Trailing commas
-    """
-    import re as _re
-
-    # 1) Екрановані слеші
-    s = js.replace("\\/", "/")
-
-    # 2) Ключі без лапок: {word: або ,word: → {"word": або ,"word":
-    s = _re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', s)
-
-    # 3) Конвертація одинарних лапок у подвійні (акуратно)
-    s = _single_to_double_quotes(s)
-
-    # 4) Trailing commas перед } або ]
-    s = _re.sub(r',(\s*[}\]])', r'\1', s)
-
-    return s
-
-
-def _single_to_double_quotes(s: str) -> str:
-    """
-    Замінює 'text' на "text", але не чіпає:
-    - Рядки всередині "..." (подвійні лапки)
-    - Екрановані \'
-    """
-    result = []
-    i = 0
-    n = len(s)
-    in_double = False
-    in_single = False
-    escape = False
-
-    while i < n:
-        ch = s[i]
-
-        if escape:
-            result.append(ch)
-            escape = False
-            i += 1
-            continue
-
-        if ch == "\\":
-            result.append(ch)
-            escape = True
-            i += 1
-            continue
-
-        if in_double:
-            result.append(ch)
-            if ch == '"':
-                in_double = False
-            i += 1
-            continue
-
-        if in_single:
-            if ch == "'":
-                # Кінець рядка в одинарних лапках — закриваємо подвійною
-                result.append('"')
-                in_single = False
-            elif ch == '"':
-                # Лапка всередині '...' — екрануємо
-                result.append('\\"')
-            else:
-                result.append(ch)
-            i += 1
-            continue
-
-        # Не в лапках
-        if ch == '"':
-            in_double = True
-            result.append(ch)
-        elif ch == "'":
-            in_single = True
-            result.append('"')
-        else:
-            result.append(ch)
-        i += 1
-
-    return "".join(result)
 
 def _extract_calendar_json(html: str) -> Optional[str]:
-    """
-    Знаходить `window.calendarComponentStates[1] = {...}` і повертає
-    валідний JSON-рядок.
-
-    ForexFactory віддає JS-об'єкт (без лапок на ключах, з коментарями,
-    з function() {...}). Тому треба конвертувати JS → JSON.
-    """
     marker = "window.calendarComponentStates[1]"
     idx = html.find(marker)
     if idx < 0:
@@ -188,7 +103,6 @@ def _extract_calendar_json(html: str) -> Optional[str]:
     if brace_start < 0:
         return None
 
-    # Балансуємо фігурні дужки, враховуючи лапки (' і ") та escape
     depth = 0
     in_string = False
     string_char = None
@@ -224,13 +138,149 @@ def _extract_calendar_json(html: str) -> Optional[str]:
         return None
 
     raw_js = html[brace_start:end]
-
-    # --- Конвертуємо JS → JSON ---
-    json_str = _js_object_to_json(raw_js)
-    return json_str
+    return _js_object_to_json(raw_js)
 
 
+# ---------------------------------------------------------------------------
+# Конвертація JS → JSON
+# ---------------------------------------------------------------------------
 
+def _js_object_to_json(js: str) -> str:
+    # 1) Екрановані слеші
+    s = js.replace("\\/", "/")
+
+    # 2) Object.freeze(X) → X (з балансуванням дужок)
+    s = _unwrap_object_freeze(s)
+
+    # 3) Ключі без лапок
+    s = re.sub(
+        r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)',
+        r'\1"\2"\3',
+        s,
+    )
+
+    # 4) Одинарні лапки → подвійні
+    s = _single_to_double_quotes(s)
+
+    # 5) Trailing commas
+    s = re.sub(r',(\s*[}\]])', r'\1', s)
+
+    return s
+
+
+def _unwrap_object_freeze(s: str) -> str:
+    """
+    Object.freeze(X) → X, з балансуванням дужок.
+    Object.freeze(({"a": 1})) → ({"a": 1}) — вміст зберігається як є.
+    Працює як для об'єктів {}, так і для масивів [].
+    """
+    result = []
+    i = 0
+    n = len(s)
+    marker = "Object.freeze("
+    marker_len = len(marker)
+
+    while i < n:
+        if s[i:i+marker_len] == marker:
+            # Знаходимо парну ")" для цього "("
+            j = i + marker_len
+            depth = 1
+            in_str = False
+            str_ch = None
+            esc = False
+
+            while j < n and depth > 0:
+                ch = s[j]
+                if esc:
+                    esc = False
+                    j += 1
+                    continue
+                if ch == "\\":
+                    esc = True
+                    j += 1
+                    continue
+                if in_str:
+                    if ch == str_ch:
+                        in_str = False
+                        str_ch = None
+                    j += 1
+                    continue
+                if ch in ('"', "'"):
+                    in_str = True
+                    str_ch = ch
+                    j += 1
+                    continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+
+            # Вміст між "Object.freeze(" і відповідною ")"
+            inner = s[i + marker_len:j]
+            result.append(inner)
+            i = j + 1  # пропускаємо закриваючу ")"
+        else:
+            result.append(s[i])
+            i += 1
+
+    return "".join(result)
+
+
+def _single_to_double_quotes(s: str) -> str:
+    result = []
+    i = 0
+    n = len(s)
+    in_double = False
+    in_single = False
+    escape = False
+
+    while i < n:
+        ch = s[i]
+
+        if escape:
+            result.append(ch)
+            escape = False
+            i += 1
+            continue
+
+        if ch == "\\":
+            result.append(ch)
+            escape = True
+            i += 1
+            continue
+
+        if in_double:
+            result.append(ch)
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if in_single:
+            if ch == "'":
+                result.append('"')
+                in_single = False
+            elif ch == '"':
+                result.append('\\"')
+            else:
+                result.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = True
+            result.append(ch)
+        elif ch == "'":
+            in_single = True
+            result.append('"')
+        else:
+            result.append(ch)
+        i += 1
+
+    return "".join(result)
 
 
 # ---------------------------------------------------------------------------
@@ -238,42 +288,32 @@ def _extract_calendar_json(html: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _parse_event(ev: dict) -> Optional[dict]:
-    """Перетворює JSON події у наш формат."""
     name = ev.get("name") or ev.get("soloTitle") or ""
     if not name:
         return None
 
-    # Валюта: 'USD', 'EUR', ...
     currency = ev.get("currency") or ""
     if not currency:
-        # Інколи country='US', currency='USD'
         country = ev.get("country") or ""
         currency = country[:3].upper() if len(country) >= 3 else country
-
-    # Час: dateline (unix seconds)
-    dateline = ev.get("dateline")
-    if dateline:
-        try:
-            dt = datetime.fromtimestamp(int(dateline), tz=timezone.utc)
-            time_utc = dt.isoformat()
-        except (ValueError, TypeError, OSError):
-            time_utc = None
-    else:
-        time_utc = None
-
-    if time_utc is None:
+    if not currency:
         return None
 
-    # Важливість: з impactClass
+    dateline = ev.get("dateline")
+    if not dateline:
+        return None
+    try:
+        dt = datetime.fromtimestamp(int(dateline), tz=timezone.utc)
+        time_utc = dt.isoformat()
+    except (ValueError, TypeError, OSError):
+        return None
+
     impact = _parse_impact(ev.get("impactClass") or ev.get("impactName") or "")
 
-    # Значення
     forecast = _clean_value(ev.get("forecast"))
     previous = _clean_value(ev.get("previous"))
     actual = _clean_value(ev.get("actual"))
     revision = _clean_value(ev.get("revision"))
-
-    # Якщо є revision — додаємо до previous як окреме поле? Поки ігноруємо
 
     return {
         "provider": "forex_factory",
@@ -284,7 +324,6 @@ def _parse_event(ev: dict) -> Optional[dict]:
         "forecast_value": forecast,
         "previous_value": previous,
         "actual_value": actual,
-        # Додаткові поля (не входять у схему БД, але корисні)
         "_revision": revision,
         "_actual_better_worse": ev.get("actualBetterWorse"),
         "_event_id": ev.get("id"),
@@ -292,8 +331,7 @@ def _parse_event(ev: dict) -> Optional[dict]:
 
 
 def _parse_impact(impact_str: str) -> str:
-    """'icon--ff-impact-ora' → 'medium'."""
-    s = impact_str.lower()
+    s = (impact_str or "").lower()
     if "impact-red" in s or "high" in s:
         return "high"
     if "impact-ora" in s or "medium" in s:
@@ -306,7 +344,6 @@ def _parse_impact(impact_str: str) -> str:
 
 
 def _clean_value(v) -> Optional[str]:
-    """Порожній рядок → None."""
     if v is None:
         return None
     s = str(v).strip()
