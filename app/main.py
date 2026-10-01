@@ -1,5 +1,13 @@
 """
 FastAPI-додаток: API для подій, цін, impact, LIVE, Paper Trading.
+
+Scheduler:
+  - refresh_calendar (day=today) — кожні 15 хв (швидке підхоплення actual_value)
+  - refresh_calendar (day=today) — кожні 6 год (повне оновлення)
+  - refresh_calendar (day=today) — о 00:01 UTC щодня
+  - load_history_sync — кожні 24 години
+  - recompute_impact_job — кожні 30 хвилин
+  - paper_engine_job — кожні 5 хвилин
 """
 
 import asyncio
@@ -77,6 +85,13 @@ def _iso_to_ms(iso_str: str | None) -> int | None:
 # Background jobs
 # ---------------------------------------------------------------------------
 async def refresh_calendar(day: str = "today"):
+    """
+    Парсить ForexFactory і додає/оновлює події в БД.
+
+    INSERT OR IGNORE — додає нові.
+    UPDATE — оновлює forecast/previous/actual для вже існуючих
+             (важливо для підхоплення actual_value після публікації).
+    """
     logger.info(f"Refreshing economic calendar (day={day})...")
     try:
         events = fetch_events(day=day)
@@ -85,8 +100,11 @@ async def refresh_calendar(day: str = "today"):
             events = [e for e in events if e["country"] in settings.calendar_currencies]
 
         inserted = 0
+        updated = 0
+
         async with get_db() as db:
             for e in events:
+                # 1) Спроба INSERT (нові події)
                 cur = await db.execute("""
                     INSERT OR IGNORE INTO events
                     (provider, title, country, importance, time_utc,
@@ -95,13 +113,39 @@ async def refresh_calendar(day: str = "today"):
                 """, (e["provider"], e["title"], e["country"], e["importance"],
                       e["time_utc"], e["forecast_value"], e["previous_value"],
                       e["actual_value"]))
+
                 if cur.rowcount > 0:
                     inserted += 1
+                else:
+                    # 2) UPDATE — оновлюємо actual/forecast, якщо вони з'явились
+                    upd = await db.execute("""
+                        UPDATE events
+                        SET forecast_value = COALESCE(?, forecast_value),
+                            previous_value = COALESCE(?, previous_value),
+                            actual_value = COALESCE(?, actual_value)
+                        WHERE provider = ? AND title = ? AND time_utc = ?
+                          AND (
+                            (actual_value IS NULL AND ? IS NOT NULL) OR
+                            (forecast_value IS NULL AND ? IS NOT NULL)
+                          )
+                    """, (e["forecast_value"], e["previous_value"], e["actual_value"],
+                          e["provider"], e["title"], e["time_utc"],
+                          e["actual_value"], e["forecast_value"]))
+                    if upd.rowcount > 0:
+                        updated += 1
+
             await db.commit()
 
-        logger.info(f"Calendar refreshed: fetched={len(events)}, inserted={inserted}")
-        await manager.broadcast({"type": "calendar_refreshed",
-                                 "fetched": len(events), "inserted": inserted})
+        logger.info(
+            f"Calendar refreshed: fetched={len(events)}, "
+            f"inserted={inserted}, updated={updated}"
+        )
+        await manager.broadcast({
+            "type": "calendar_refreshed",
+            "fetched": len(events),
+            "inserted": inserted,
+            "updated": updated,
+        })
     except Exception as ex:
         logger.exception(f"Calendar refresh failed: {ex}")
 
@@ -151,6 +195,9 @@ async def live_broadcast_loop():
         await asyncio.sleep(2)
 
 
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -161,21 +208,44 @@ async def lifespan(app: FastAPI):
     except Exception as ex:
         logger.exception(f"Initial history load failed: {ex}")
 
-    scheduler.add_job(refresh_calendar, "interval",
-                      hours=settings.calendar_refresh_hours,
-                      id="calendar_interval", kwargs={"day": "today"})
-    scheduler.add_job(refresh_calendar, CronTrigger(hour=0, minute=1),
-                      id="calendar_daily", kwargs={"day": "today"})
-    scheduler.add_job(load_history_sync, "interval",
-                      hours=24, id="history_daily",
-                      kwargs={"days": 2, "interval": "1"})
-    scheduler.add_job(recompute_impact_job, "interval",
-                      minutes=30, id="impact_recompute_auto")
-    scheduler.add_job(paper_engine_job, "interval",
-                      minutes=5, id="paper_engine")
+    # --- Scheduler jobs ---
+    # 1) Календар кожні 15 хв — швидке підхоплення actual_value
+    scheduler.add_job(
+        refresh_calendar, "interval",
+        minutes=15, id="calendar_frequent",
+        kwargs={"day": "today"},
+    )
+    # 2) Календар кожні 6 год — повне оновлення
+    scheduler.add_job(
+        refresh_calendar, "interval",
+        hours=settings.calendar_refresh_hours, id="calendar_interval",
+        kwargs={"day": "today"},
+    )
+    # 3) Календар о 00:01 UTC — новий день
+    scheduler.add_job(
+        refresh_calendar, CronTrigger(hour=0, minute=1),
+        id="calendar_daily", kwargs={"day": "today"},
+    )
+    # 4) Свічки — кожні 24 год
+    scheduler.add_job(
+        load_history_sync, "interval",
+        hours=24, id="history_daily",
+        kwargs={"days": 2, "interval": "1"},
+    )
+    # 5) Impact — кожні 30 хв
+    scheduler.add_job(
+        recompute_impact_job, "interval",
+        minutes=30, id="impact_recompute_auto",
+    )
+    # 6) Paper engine — кожні 5 хв
+    scheduler.add_job(
+        paper_engine_job, "interval",
+        minutes=5, id="paper_engine",
+    )
     scheduler.start()
     logger.info(f"Scheduler started. Jobs: {[j.id for j in scheduler.get_jobs()]}")
 
+    # WebSocket Bybit — у власному потоці
     start_ws_thread()
 
     asyncio.create_task(recompute_impact_job())
@@ -428,26 +498,10 @@ async def api_paper_trades(limit: int = 100, status: str | None = None):
     return await get_trades(limit=limit, status=status)
 
 
-@app.get("/paper/equity_curve")
-async def api_paper_equity_curve():
-    return await get_equity_curve()
-
-
-@app.post("/paper/reset")
-async def api_paper_reset():
-    return await reset_account()
-
-
-@app.post("/paper/run")
-async def api_paper_run():
-    """Ручний запуск paper engine (для тесту)."""
-    return await process_paper_engine()
-
 @app.get("/paper/trades/range")
 async def api_paper_trades_range(hours: int = 24):
     """Повертає угоди, що перетинаються з діапазоном [now-hours, now]."""
-    import time as _t
-    now_ms = int(_t.time() * 1000)
+    now_ms = int(_time.time() * 1000)
     from_ms = now_ms - hours * 60 * 60 * 1000
 
     async with get_db() as db:
@@ -467,6 +521,22 @@ async def api_paper_trades_range(hours: int = 24):
         """, (from_ms, from_ms))
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
+
+
+@app.get("/paper/equity_curve")
+async def api_paper_equity_curve():
+    return await get_equity_curve()
+
+
+@app.post("/paper/reset")
+async def api_paper_reset():
+    return await reset_account()
+
+
+@app.post("/paper/run")
+async def api_paper_run():
+    """Ручний запуск paper engine (для тесту)."""
+    return await process_paper_engine()
 
 
 # ============================================================================
