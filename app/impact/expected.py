@@ -20,46 +20,64 @@ RULES = [
                  "average earnings", "employment change"],
      "higher": "down", "lower": "up"},
 
-    # --- USD: GDP ---
+    # --- Unemployment Claims: більше заявок = dovish = up для SOL ---
+    {"pattern": ["unemployment claims", "jobless claims", "initial claims"],
+     "higher": "up", "lower": "down"},
+
+    # --- Challenger Job Cuts: більше скорочень = dovish = up ---
+    {"pattern": ["challenger job cuts"],
+     "higher": "up", "lower": "down"},
+
+    # --- JOLTS: більше вакансій = сильніший ринок = hawkish = down ---
+    {"pattern": ["jolts"],
+     "higher": "down", "lower": "up"},
+
+    # --- GDP ---
     {"pattern": ["gdp"],
      "higher": "up", "lower": "down"},
 
-    # --- USD: споживання ---
+    # --- Retail sales ---
     {"pattern": ["retail sales"],
      "higher": "up", "lower": "down"},
 
-    # --- USD: безробіття ---
+    # --- Unemployment rate ---
     {"pattern": ["unemployment rate"],
      "higher": "up", "lower": "down"},
 
-    # --- Ставки ---
+    # --- Interest rate decisions ---
     {"pattern": ["federal funds rate", "interest rate decision",
                  "cash rate", "bank rate", "official cash rate",
                  "monetary policy decision"],
      "higher": "down", "lower": "up"},
 
-    # --- ISM / PMI ---
-    {"pattern": ["ism manufacturing pmi", "ism services pmi"],
+    # --- ISM/PMI ---
+    {"pattern": ["ism manufacturing pmi", "ism services pmi",
+                 "final manufacturing pmi", "manufacturing pmi",
+                 "services pmi"],
      "higher": "up", "lower": "down"},
 
-    # --- Consumer confidence ---
+    # --- Consumer Confidence ---
     {"pattern": ["cb consumer confidence", "consumer confidence"],
      "higher": "up", "lower": "down"},
-
-    # --- JOLTS ---
-    {"pattern": ["jolts"],
-     "higher": "down", "lower": "up"},
 
     # --- Trade balance ---
     {"pattern": ["trade balance"],
      "higher": "up", "lower": "down"},
 
-    # --- Building permits / housing ---
+    # --- Building permits ---
     {"pattern": ["building permits", "housing starts"],
      "higher": "up", "lower": "down"},
 
     # --- Industrial production ---
     {"pattern": ["industrial production"],
+     "higher": "up", "lower": "down"},
+
+    # --- Retail/Construction spending ---
+    {"pattern": ["construction spending"],
+     "higher": "up", "lower": "down"},
+
+    # --- Vehicle sales ---
+    {"pattern": ["vehicle sales", "omdia"],
      "higher": "up", "lower": "down"},
 ]
 
