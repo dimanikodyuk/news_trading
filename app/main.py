@@ -1,11 +1,5 @@
 """
-FastAPI-додаток: API для подій, цін, impact, LIVE-стрічки, WebSocket.
-
-Scheduler:
-  - refresh_calendar (day=today) — кожні 6 годин
-  - refresh_calendar (day=today) — о 00:01 UTC щодня
-  - load_history_sync — кожні 24 години
-  - recompute_impact_job — кожні 30 хвилин
+FastAPI-додаток: API для подій, цін, impact, LIVE, Paper Trading.
 """
 
 import asyncio
@@ -28,6 +22,8 @@ from app.prices.history import load_history_sync
 from app.impact.batch import process_all_past_events
 from app.impact.stats import get_stats, get_heatmap, get_cross_asset_detail
 from app.bot.notifier import notify_impact
+from app.paper.engine import process_paper_engine
+from app.paper.stats import get_account, get_trades, get_equity_curve, reset_account
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,9 +34,6 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 
-# ---------------------------------------------------------------------------
-# WebSocket connection manager (для веб-панелі)
-# ---------------------------------------------------------------------------
 class ConnectionManager:
     def __init__(self):
         self.active: list[WebSocket] = []
@@ -67,9 +60,6 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def _iso_to_ms(iso_str: str | None) -> int | None:
     if not iso_str:
         return None
@@ -134,15 +124,22 @@ async def recompute_impact_job():
         if stats["saved"] > 0 or stats["processed"] > 0:
             logger.info(f"Impact recompute: {stats}")
             await manager.broadcast({"type": "impact_recomputed", **stats})
-
             for eid in pending:
                 await notify_impact(eid)
     except Exception as ex:
         logger.exception(f"Impact recompute failed: {ex}")
 
 
+async def paper_engine_job():
+    try:
+        stats = await process_paper_engine()
+        if stats["opened"] or stats["closed"]:
+            await manager.broadcast({"type": "paper_updated", **stats})
+    except Exception as ex:
+        logger.exception(f"Paper engine failed: {ex}")
+
+
 async def live_broadcast_loop():
-    """Кожні 2 сек надсилає активним WS-клієнтам оновлення live-карток."""
     while True:
         try:
             if manager.active:
@@ -154,9 +151,6 @@ async def live_broadcast_loop():
         await asyncio.sleep(2)
 
 
-# ---------------------------------------------------------------------------
-# Lifespan
-# ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -167,30 +161,21 @@ async def lifespan(app: FastAPI):
     except Exception as ex:
         logger.exception(f"Initial history load failed: {ex}")
 
-    scheduler.add_job(
-        refresh_calendar, "interval",
-        hours=settings.calendar_refresh_hours,
-        id="calendar_interval",
-        kwargs={"day": "today"},
-    )
-    scheduler.add_job(
-        refresh_calendar, CronTrigger(hour=0, minute=1),
-        id="calendar_daily",
-        kwargs={"day": "today"},
-    )
-    scheduler.add_job(
-        load_history_sync, "interval",
-        hours=24, id="history_daily",
-        kwargs={"days": 2, "interval": "1"},
-    )
-    scheduler.add_job(
-        recompute_impact_job, "interval",
-        minutes=30, id="impact_recompute_auto",
-    )
+    scheduler.add_job(refresh_calendar, "interval",
+                      hours=settings.calendar_refresh_hours,
+                      id="calendar_interval", kwargs={"day": "today"})
+    scheduler.add_job(refresh_calendar, CronTrigger(hour=0, minute=1),
+                      id="calendar_daily", kwargs={"day": "today"})
+    scheduler.add_job(load_history_sync, "interval",
+                      hours=24, id="history_daily",
+                      kwargs={"days": 2, "interval": "1"})
+    scheduler.add_job(recompute_impact_job, "interval",
+                      minutes=30, id="impact_recompute_auto")
+    scheduler.add_job(paper_engine_job, "interval",
+                      minutes=5, id="paper_engine")
     scheduler.start()
     logger.info(f"Scheduler started. Jobs: {[j.id for j in scheduler.get_jobs()]}")
 
-    # WebSocket Bybit — у власному потоці (не asyncio-task!)
     start_ws_thread()
 
     asyncio.create_task(recompute_impact_job())
@@ -386,10 +371,8 @@ async def _build_live_current() -> dict:
             ev_ts = _iso_to_ms(ev["time_utc"])
             if ev_ts is None:
                 continue
-
             baseline_ts = ev_ts - 60_000
             symbols_data = {}
-
             for sym in ["SOLUSDT", "BTCUSDT", "ETHUSDT"]:
                 cur = await db.execute("""
                     SELECT close FROM prices
@@ -406,7 +389,6 @@ async def _build_live_current() -> dict:
                     ORDER BY ts DESC LIMIT 1
                 """, (sym,))
                 row = await cur.fetchone()
-
                 if baseline and row:
                     current = float(row["close"])
                     ret_pct = (current - baseline) / baseline * 100.0
@@ -425,13 +407,41 @@ async def _build_live_current() -> dict:
                 "seconds_to": max(0, int((ev_ts - now_ms) / 1000)),
                 "symbols": symbols_data,
             })
-
     return {"now_ms": now_ms, "active": result}
 
 
 @app.get("/live/current")
 async def api_live_current():
     return await _build_live_current()
+
+
+# ============================================================================
+# API: Paper Trading
+# ============================================================================
+@app.get("/paper/account")
+async def api_paper_account():
+    return await get_account()
+
+
+@app.get("/paper/trades")
+async def api_paper_trades(limit: int = 100, status: str | None = None):
+    return await get_trades(limit=limit, status=status)
+
+
+@app.get("/paper/equity_curve")
+async def api_paper_equity_curve():
+    return await get_equity_curve()
+
+
+@app.post("/paper/reset")
+async def api_paper_reset():
+    return await reset_account()
+
+
+@app.post("/paper/run")
+async def api_paper_run():
+    """Ручний запуск paper engine (для тесту)."""
+    return await process_paper_engine()
 
 
 # ============================================================================
@@ -443,7 +453,6 @@ async def api_events_load_history(week: str = "last", include_this_week: bool = 
     weeks = [week]
     if include_this_week and week != "this":
         weeks.append("this")
-
     per_week: dict = {}
     for w in weeks:
         try:
@@ -454,7 +463,6 @@ async def api_events_load_history(week: str = "last", include_this_week: bool = 
         events = [e for e in events if e["importance"] in settings.calendar_importance]
         if settings.calendar_currencies:
             events = [e for e in events if e["country"] in settings.calendar_currencies]
-
         inserted = 0
         async with get_db() as db:
             for e in events:
@@ -471,7 +479,6 @@ async def api_events_load_history(week: str = "last", include_this_week: bool = 
             await db.commit()
         per_week[w] = {"fetched": len(events), "inserted": inserted}
         total_inserted += inserted
-
     return {"per_week": per_week, "total_inserted": total_inserted}
 
 

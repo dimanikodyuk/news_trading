@@ -16,7 +16,7 @@ def _ensure_db_dir():
     Path(settings.db_path_abs).parent.mkdir(parents=True, exist_ok=True)
 
 
-SCHEMA = """
+TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider TEXT NOT NULL,
@@ -47,30 +47,59 @@ CREATE TABLE IF NOT EXISTS event_impact (
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     symbol TEXT NOT NULL,
     importance TEXT,
-
-    -- Ціни
     price_baseline REAL,
     price_t1 REAL, price_t5 REAL, price_t15 REAL, price_t30 REAL, price_t60 REAL,
-
-    -- % зміни
     ret_1m REAL, ret_5m REAL, ret_15m REAL, ret_30m REAL, ret_60m REAL,
-
-    -- Напрямок (up/down/flat)
     dir_1m TEXT, dir_5m TEXT, dir_15m TEXT, dir_30m TEXT, dir_60m TEXT,
-
-    -- Очікування та влучання
-    expected_dir TEXT,   -- up/down/flat/None
-    hit TEXT,            -- HIT/MISS/NEUTRAL/N/A
-
+    expected_dir TEXT,
+    hit TEXT,
     threshold_pct REAL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(event_id, symbol)
 );
 
+CREATE TABLE IF NOT EXISTS paper_account (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    initial_balance REAL NOT NULL DEFAULT 100.0,
+    balance REAL NOT NULL DEFAULT 100.0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,          -- 'long' | 'short'
+    entry_ts INTEGER NOT NULL,        -- ms
+    entry_price REAL NOT NULL,
+    entry_fee REAL NOT NULL,
+    exit_ts INTEGER,
+    exit_price REAL,
+    exit_fee REAL,
+    size_usd REAL NOT NULL,
+    pnl REAL,
+    pnl_pct REAL,
+    status TEXT NOT NULL DEFAULT 'OPEN',   -- 'OPEN' | 'CLOSED'
+    reason TEXT,                      -- 'hit_rate>60' | 'manual'
+    opened_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    closed_at TEXT,
+    UNIQUE(event_id, symbol)          -- одна угода на (подія, символ)
+);
+"""
+
+MIGRATIONS = [
+    ("event_impact", "expected_dir", "TEXT"),
+    ("event_impact", "hit", "TEXT"),
+]
+
+INDEXES_SQL = """
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(time_utc);
 CREATE INDEX IF NOT EXISTS idx_prices_ts ON prices(symbol, ts);
 CREATE INDEX IF NOT EXISTS idx_impact_event ON event_impact(event_id);
 CREATE INDEX IF NOT EXISTS idx_impact_hit ON event_impact(hit);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_event ON paper_trades(event_id);
 """
 
 
@@ -88,24 +117,37 @@ async def get_db():
 async def init_db():
     _ensure_db_dir()
     async with get_db() as db:
-        await db.executescript(SCHEMA)
+        await db.executescript(TABLES_SQL)
         await db.commit()
 
-        # --- Міграції для існуючих БД ---
-        await _migrate(db)
+        for table, col, coltype in MIGRATIONS:
+            await _add_column_if_missing(db, table, col, coltype)
 
+        await db.executescript(INDEXES_SQL)
+        await db.commit()
 
-async def _migrate(db: aiosqlite.Connection):
-    """Додає нові колонки у вже існуючі таблиці (ідемпотентно)."""
-
-    async def add_col(table: str, col: str, coltype: str):
-        try:
-            await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+        # Ініціалізуємо paper_account (один рядок)
+        cur = await db.execute("SELECT COUNT(*) AS n FROM paper_account")
+        if (await cur.fetchone())["n"] == 0:
+            await db.execute(
+                "INSERT INTO paper_account (id, initial_balance, balance) VALUES (1, 100.0, 100.0)"
+            )
             await db.commit()
-            logger.info(f"Міграція: додано {table}.{col}")
-        except Exception:
-            # Колонка вже є — нормально
-            pass
+            logger.info("paper_account створено: $100.00")
 
-    await add_col("event_impact", "expected_dir", "TEXT")
-    await add_col("event_impact", "hit", "TEXT")
+    logger.info(f"БД готова: {settings.db_path_abs}")
+
+
+async def _add_column_if_missing(db: aiosqlite.Connection,
+                                  table: str, col: str, coltype: str):
+    cur = await db.execute(f"PRAGMA table_info({table})")
+    rows = await cur.fetchall()
+    existing = {r["name"] for r in rows}
+    if col in existing:
+        return
+    try:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+        await db.commit()
+        logger.info(f"Міграція: додано {table}.{col}")
+    except Exception as ex:
+        logger.warning(f"Не вдалось додати {table}.{col}: {ex}")
