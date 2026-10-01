@@ -6,8 +6,8 @@
 <title>News Trading Bot</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
 <style>
   body { background: #0f172a; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; }
   .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; }
@@ -94,10 +94,7 @@
   .symbol-tab.eth.active { background: #8b5cf6; color: #fff; border-color: #8b5cf6; }
   .symbol-tab.all.active { background: #64748b; color: #fff; border-color: #64748b; }
 
-  /* Кнопки zoom */
   .zoom-btn {
-    position: absolute;
-    z-index: 10;
     width: 32px; height: 32px;
     border-radius: 0.375rem;
     background: #1e293b;
@@ -115,6 +112,7 @@
     position: absolute;
     top: 10px; right: 10px;
     display: flex; gap: 4px;
+    z-index: 10;
   }
 </style>
 </head>
@@ -205,7 +203,7 @@
     <div class="card p-4 mb-6">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h2 class="section-title mb-0">
-          <span class="tip" data-tip="Ціна SOLUSDT з маркерами економічних подій і точками входу/виходу paper-угод. Колесо мишки — zoom, drag — pan.">SOLUSDT — графік з подіями та угодами</span>
+          <span class="tip" data-tip="Ціна SOLUSDT з маркерами подій і точками входу/виходу paper-угод. Колесо мишки — zoom, drag — pan, подвійний клік — reset.">SOLUSDT — графік з подіями та угодами</span>
         </h2>
         <div class="flex gap-2 flex-wrap">
           <button class="tab" onclick="loadPriceChart(0.25)">15 хв</button>
@@ -488,10 +486,11 @@
         <li><b>Drag</b> (затиснути і тягнути) — переміщення</li>
         <li><b>Подвійний клік</b> — скинути zoom</li>
         <li><b>Кнопки + / − / Reset</b> — у правому верхньому куті графіка</li>
-        <li><b>▲ зелений</b> — LONG entry (вхід у лонг)</li>
-        <li><b>▼ червоний</b> — SHORT entry (вхід у шорт)</li>
+        <li><b>▲ зелений</b> — LONG entry</li>
+        <li><b>▼ червоний</b> — SHORT entry</li>
         <li><b>◆ ромб</b> — exit (колір = P&L: зелений якщо +, червоний якщо −)</li>
         <li>Наведи на маркер — побачиш деталі угоди</li>
+        <li>Якщо в одній точці декілька подій — тултіп покаже усі</li>
       </ul>
     </div>
 
@@ -507,7 +506,7 @@
         <li>Відкрито менше ніж <b>3</b> угоди одночасно</li>
       </ol>
       <p class="text-slate-300 text-sm leading-relaxed mt-3">
-        <b>Режим:</b> SPOT + LONG-only. Події з `expected_dir = down` <b>пропускаються</b> — на споті шортити неможливо.<br>
+        <b>Режим:</b> SPOT + LONG-only. Події з `expected_dir = down` <b>пропускаються</b>.<br>
         <b>Вхід:</b> close свічки T+1.<br>
         <b>Розмір:</b> $10 за угоду.<br>
         <b>Комісія:</b> 0.1% (Bybit spot taker) + slippage 0.05%.<br>
@@ -557,11 +556,26 @@
 
 <script>
 // ==================== REGISTER ZOOM PLUGIN ====================
-if (window.Chart && window.ChartZoom) {
-  Chart.register(window.ChartZoom);
-} else if (window.Chart && window.chartjsPluginZoom) {
-  Chart.register(window.chartjsPluginZoom);
+function registerZoomPlugin() {
+  if (typeof Chart === 'undefined') {
+    console.error('❌ Chart.js не завантажено');
+    return false;
+  }
+  const plugin = window.ChartZoom || window.chartjsPluginZoom;
+  if (!plugin) {
+    console.warn('⚠️ Chart.js Zoom plugin не завантажено — zoom вимкнено');
+    return false;
+  }
+  try {
+    Chart.register(plugin);
+    console.log('✅ Chart.js Zoom plugin зареєстровано');
+    return true;
+  } catch (e) {
+    console.error('❌ Помилка реєстрації zoom plugin:', e);
+    return false;
+  }
 }
+const ZOOM_ENABLED = registerZoomPlugin();
 
 // ==================== TIME FORMATTING ====================
 const LOCAL_TZ = 'Europe/Kyiv';
@@ -671,13 +685,25 @@ let equityChart = null;
 let currentChartHours = 6;
 let currentPrices = {};
 let impactSymbol = 'SOLUSDT';
+let tradesByLabel = {};
+let eventsByLabelAll = {};
+let labelsGlobal = [];
 
 // ==================== CHART ZOOM CONTROLS ====================
 function zoomChart(factor) {
   if (!priceChart) return;
+  if (ZOOM_ENABLED && typeof priceChart.zoomScale === 'function') {
+    try {
+      priceChart.zoomScale('x', factor);
+      return;
+    } catch (e) {
+      // fallback нижче
+    }
+  }
+  // Fallback — ручне масштабування
   const xScale = priceChart.scales.x;
-  const min = xScale.min;
-  const max = xScale.max;
+  const min = xScale.min ?? 0;
+  const max = xScale.max ?? (xScale.labels.length - 1);
   const center = (min + max) / 2;
   const halfRange = (max - min) / 2 / factor;
   const newMin = Math.max(0, center - halfRange);
@@ -689,6 +715,12 @@ function zoomChart(factor) {
 
 function resetZoom() {
   if (!priceChart) return;
+  if (ZOOM_ENABLED && typeof priceChart.resetZoom === 'function') {
+    try {
+      priceChart.resetZoom();
+      return;
+    } catch (e) {}
+  }
   priceChart.options.scales.x.min = undefined;
   priceChart.options.scales.x.max = undefined;
   priceChart.update('none');
@@ -790,7 +822,6 @@ async function loadLiveRecent() {
 async function loadPriceChart(hours = null) {
   if (hours !== null) currentChartHours = hours;
 
-  // підсвітка кнопок
   document.querySelectorAll('#tab-dashboard button.tab').forEach(b => {
     b.classList.remove('active');
     const txt = b.textContent.trim();
@@ -807,11 +838,9 @@ async function loadPriceChart(hours = null) {
   const candles = data.candles;
   const events = data.events;
 
-  // Для великих проміжків — групуємо; для малих — ні
   let step = 1;
   if (currentChartHours >= 168) step = 30;
   else if (currentChartHours >= 24) step = 5;
-  // 15 хв / 1 год / 6 год — крок 1 (показуємо сирі хвилинні свічки)
 
   const grouped = [];
   for (let i = 0; i < candles.length; i += step) {
@@ -823,7 +852,6 @@ async function loadPriceChart(hours = null) {
   const labels = grouped.map(c => {
     const d = new Date(c.ts);
     if (currentChartHours < 1) {
-      // 15 хв — показуємо з секундами (мм:сс)
       return d.toLocaleTimeString('uk-UA', {
         timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
       });
@@ -839,6 +867,7 @@ async function loadPriceChart(hours = null) {
   });
   const prices = grouped.map(c => c.close);
   const tsArray = grouped.map(c => c.ts);
+  labelsGlobal = labels;
 
   // ===== Маркери подій =====
   const markersByLevel = { high: [], medium: [] };
@@ -854,9 +883,14 @@ async function loadPriceChart(hours = null) {
     else if (ev.importance === 'medium') markersByLevel.medium.push({ idx: bestIdx, ev });
   }
 
-  const eventsByLabel = {};
-  for (const m of markersByLevel.high) eventsByLabel[labels[m.idx]] = m.ev;
-  for (const m of markersByLevel.medium) eventsByLabel[labels[m.idx]] = m.ev;
+  // Групуємо УСІ події по label (може бути 3 на одну точку)
+  eventsByLabelAll = {};
+  const allEvents = markersByLevel.high.concat(markersByLevel.medium);
+  for (const m of allEvents) {
+    const lbl = labels[m.idx];
+    if (!eventsByLabelAll[lbl]) eventsByLabelAll[lbl] = [];
+    eventsByLabelAll[lbl].push(m.ev);
+  }
 
   // ===== Маркери угод =====
   let trades = [];
@@ -867,29 +901,24 @@ async function loadPriceChart(hours = null) {
   const longEntries = [];
   const shortEntries = [];
   const exits = [];
-  const tradesByLabel = {};
+  tradesByLabel = {};
 
   for (const t of trades) {
-    // Entry
     const entryIdx = findIdxByTs(tsArray, t.entry_ts);
     if (entryIdx >= 0) {
-      const point = { x: labels[entryIdx], y: prices[entryIdx], trade: t, kind: 'entry' };
+      const point = { x: labels[entryIdx], y: prices[entryIdx] };
       if (t.direction === 'long') longEntries.push(point);
       else shortEntries.push(point);
       tradesByLabel[labels[entryIdx]] = { ...t, kind: 'entry' };
     }
-    // Exit (якщо закрита)
     if (t.exit_ts) {
       const exitIdx = findIdxByTs(tsArray, t.exit_ts);
       if (exitIdx >= 0) {
         exits.push({
           x: labels[exitIdx],
           y: prices[exitIdx],
-          trade: t,
-          kind: 'exit',
           pnl: t.pnl
         });
-        // не перезаписуємо, якщо вже є entry на цій точці
         if (!tradesByLabel[labels[exitIdx]]) {
           tradesByLabel[labels[exitIdx]] = { ...t, kind: 'exit' };
         }
@@ -916,35 +945,25 @@ async function loadPriceChart(hours = null) {
     {
       label: 'LONG entry',
       data: longEntries.map(p => ({ x: p.x, y: p.y })),
-      backgroundColor: '#22c55e',
-      borderColor: '#ffffff',
-      borderWidth: 1.5,
-      pointRadius: 9,
-      pointHoverRadius: 13,
-      pointStyle: 'triangle',
-      rotation: 0,
+      backgroundColor: '#22c55e', borderColor: '#ffffff', borderWidth: 1.5,
+      pointRadius: 9, pointHoverRadius: 13,
+      pointStyle: 'triangle', rotation: 0,
       showLine: false, order: 1,
     },
     {
       label: 'SHORT entry',
       data: shortEntries.map(p => ({ x: p.x, y: p.y })),
-      backgroundColor: '#ef4444',
-      borderColor: '#ffffff',
-      borderWidth: 1.5,
-      pointRadius: 9,
-      pointHoverRadius: 13,
-      pointStyle: 'triangle',
-      rotation: 180,
+      backgroundColor: '#ef4444', borderColor: '#ffffff', borderWidth: 1.5,
+      pointRadius: 9, pointHoverRadius: 13,
+      pointStyle: 'triangle', rotation: 180,
       showLine: false, order: 1,
     },
     {
       label: 'Exit',
       data: exits.map(p => ({ x: p.x, y: p.y })),
       backgroundColor: exits.map(p => (p.pnl >= 0 ? '#22c55e' : '#ef4444')),
-      borderColor: '#ffffff',
-      borderWidth: 1.5,
-      pointRadius: 8,
-      pointHoverRadius: 12,
+      borderColor: '#ffffff', borderWidth: 1.5,
+      pointRadius: 8, pointHoverRadius: 12,
       pointStyle: 'rectRot',
       showLine: false, order: 2,
     },
@@ -967,14 +986,17 @@ async function loadPriceChart(hours = null) {
         tooltip: {
           callbacks: {
             label: (ctx) => {
-              const lbl = ctx.label;
-              const trade = tradesByLabel[lbl];
-              const ev = eventsByLabel[lbl];
+              if (ctx.dataset.label === 'SOLUSDT') {
+                return `Ціна: $${ctx.parsed.y.toFixed(4)}`;
+              }
+              return null;
+            },
+            afterBody: (ctx) => {
+              const lbl = ctx[0].label;
               const lines = [];
 
-              if (ctx.dataset.label === 'SOLUSDT') {
-                lines.push(`Ціна: $${ctx.parsed.y.toFixed(4)}`);
-              }
+              // Усі трейди на цьому X
+              const trade = tradesByLabel[lbl];
               if (trade) {
                 if (trade.kind === 'entry') {
                   lines.push(`💰 ${trade.direction.toUpperCase()} entry`);
@@ -989,16 +1011,24 @@ async function loadPriceChart(hours = null) {
                   lines.push(`P&L: ${sign}$${trade.pnl.toFixed(4)} (${sign}${trade.pnl_pct.toFixed(3)}%)`);
                 }
               }
-              if (ev) {
-                lines.push(`📌 ${ev.title}`);
-                if (ev.ret_15m != null) lines.push(`Ret +15хв: ${ev.ret_15m.toFixed(3)}%`);
-                if (ev.hit) lines.push(`Hit: ${ev.hit}`);
+
+              // Усі події на цьому X
+              const eventsHere = eventsByLabelAll[lbl] || [];
+              if (eventsHere.length > 0) {
+                if (eventsHere.length > 1) {
+                  lines.push(`📌 Подій на цій точці: ${eventsHere.length}`);
+                }
+                for (const ev of eventsHere) {
+                  lines.push(`📌 ${ev.title} (${ev.importance})`);
+                  if (ev.ret_15m != null) lines.push(`   Ret +15хв: ${ev.ret_15m.toFixed(3)}%`);
+                  if (ev.hit) lines.push(`   Hit: ${ev.hit}`);
+                }
               }
               return lines;
             }
           }
         },
-        zoom: {
+        zoom: ZOOM_ENABLED ? {
           pan: { enabled: true, mode: 'x' },
           zoom: {
             wheel: { enabled: true, speed: 0.1 },
@@ -1006,7 +1036,7 @@ async function loadPriceChart(hours = null) {
             mode: 'x',
           },
           limits: { x: { minRange: 10 } },
-        },
+        } : undefined,
       },
       onClick: (evt, elements) => {
         if (elements.length === 0) return;
@@ -1017,8 +1047,15 @@ async function loadPriceChart(hours = null) {
           openEvent(trade.event_id);
           return;
         }
-        const ev = eventsByLabel[lbl];
-        if (ev) openEvent(ev.id);
+        const eventsHere = eventsByLabelAll[lbl] || [];
+        if (eventsHere.length > 0) {
+          openEvent(eventsHere[0].id);
+        }
+      },
+      onHover: (evt, elements) => {
+        if (evt.native && evt.native.target) {
+          evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+        }
       },
       scales: {
         x: {
@@ -1043,7 +1080,6 @@ function findIdxByTs(tsArray, targetTs) {
     const dist = Math.abs(tsArray[i] - targetTs);
     if (dist < bestDist) { bestDist = dist; bestIdx = i; }
   }
-  // допускаємо відхилення до 2 хв
   if (bestDist > 2 * 60 * 1000) return -1;
   return bestIdx;
 }
@@ -1530,6 +1566,14 @@ async function runRecompute() {
   alert(`Готово: ${JSON.stringify(r)}`);
   loadDashboard();
 }
+
+// ==================== DOUBLE-CLICK RESET ZOOM ====================
+document.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('price-chart');
+  if (canvas) {
+    canvas.addEventListener('dblclick', () => resetZoom());
+  }
+});
 
 // ==================== WEBSOCKET ====================
 (function connectWS() {
