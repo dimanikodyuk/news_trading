@@ -304,6 +304,8 @@ def _parse_event(ev: dict) -> Optional[dict]:
         return None
     try:
         dt = datetime.fromtimestamp(int(dateline), tz=timezone.utc)
+        # Округлюємо до хвилини (без секунд)
+        dt = dt.replace(second=0, microsecond=0)
         time_utc = dt.isoformat()
     except (ValueError, TypeError, OSError):
         return None
