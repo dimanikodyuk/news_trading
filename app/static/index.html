@@ -16,6 +16,10 @@
   .badge-miss { background: #ef4444; }
   .badge-neutral { background: #64748b; }
   .badge-na { background: #334155; color: #94a3b8; }
+  .badge-open { background: #0891b2; }
+  .badge-closed { background: #475569; }
+  .badge-long { background: #22c55e; }
+  .badge-short { background: #ef4444; }
   .up { color: #22c55e; }
   .down { color: #ef4444; }
   .flat { color: #94a3b8; }
@@ -63,6 +67,14 @@
     100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
   }
   .time-utc { color: #64748b; font-size: 0.75rem; }
+
+  .equity-badge {
+    background: #1e293b;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.375rem;
+    font-family: monospace;
+    font-size: 0.75rem;
+  }
 </style>
 </head>
 <body class="min-h-screen">
@@ -73,6 +85,7 @@
     <span class="ml-auto text-sm text-slate-500">
       SOL/BTC/ETH · <span id="ws-status" class="text-red-400">● offline</span>
       · <span class="tip" data-tip="Час у веб-панелі — за Києвом (Europe/Kyiv). У дужках — UTC.">🕒 Київ</span>
+      · <span class="equity-badge tip" data-tip="Поточний equity paper-акаунту" id="nav-equity">$100.00</span>
     </span>
   </div>
 </nav>
@@ -83,6 +96,7 @@
     <div class="tab active" data-tab="dashboard">Дашборд</div>
     <div class="tab" data-tab="events">Події</div>
     <div class="tab" data-tab="impact">Вплив</div>
+    <div class="tab" data-tab="paper">💰 Paper</div>
     <div class="tab" data-tab="heatmap">Heatmap</div>
     <div class="tab" data-tab="help">Довідка</div>
   </div>
@@ -93,13 +107,11 @@
       <h1 class="text-2xl font-bold"><span class="live-pulse"></span>LIVE — події в реальному часі</h1>
       <div class="text-sm text-slate-500">Оновлення: <span class="text-cyan-400">кожні 2 сек</span></div>
     </div>
-
     <div id="live-events">
       <div class="card p-6 text-center text-slate-500">
         Немає активних подій. Найближчі — у розділі «Події».
       </div>
     </div>
-
     <div class="card p-4 mt-6">
       <h2 class="section-title">Останні розраховані події</h2>
       <table>
@@ -222,19 +234,16 @@
   <!-- ==================== IMPACT ==================== -->
   <div id="tab-impact" style="display:none">
     <h1 class="text-2xl font-bold mb-6">Статистика впливу</h1>
-
     <div class="card p-4 mb-6">
       <h2 class="section-title">Загальна</h2>
       <div id="impact-overall">—</div>
     </div>
-
     <div class="card p-4 mb-6">
       <h2 class="section-title">
         <span class="tip" data-tip="Стовпчикова діаграма: HIT/MISS/NEUTRAL по типах подій.">Hit / Miss / Neutral по типах подій</span>
       </h2>
       <canvas id="hit-chart" height="100"></canvas>
     </div>
-
     <div class="card p-4">
       <h2 class="section-title">По типах подій</h2>
       <table>
@@ -253,10 +262,118 @@
     </div>
   </div>
 
+  <!-- ==================== PAPER ==================== -->
+  <div id="tab-paper" style="display:none">
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+      <h1 class="text-2xl font-bold">💰 Paper Trading</h1>
+      <div class="flex gap-2">
+        <button onclick="runPaperEngine()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm tip"
+                data-tip="Запустити engine вручну (зазвичай працює кожні 5 хв автоматично).">
+          ▶ Запустити engine
+        </button>
+        <button onclick="resetPaper()" class="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm tip"
+                data-tip="Скинути баланс до $100 і видалити всі угоди.">
+          ↺ Скинути акаунт
+        </button>
+      </div>
+    </div>
+
+    <!-- Картки метрик -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Початковий баланс.">Початковий</div>
+        <div class="text-3xl font-bold font-mono" id="paper-initial">—</div>
+        <div class="hint">Initial balance</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Поточний equity: вільний баланс + заморожені кошти у відкритих угодах.">Equity</div>
+        <div class="text-3xl font-bold font-mono" id="paper-equity">—</div>
+        <div class="hint" id="paper-equity-hint">Balance + frozen</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Загальний P&L з моменту старту.">P&L</div>
+        <div class="text-3xl font-bold font-mono" id="paper-pnl">—</div>
+        <div class="hint" id="paper-pnl-pct">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400 tip" data-tip="Відсоток прибуткових угод серед закритих.">Win Rate</div>
+        <div class="text-3xl font-bold font-mono" id="paper-winrate">—</div>
+        <div class="hint" id="paper-trades-count">0 угод</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Відкрито</div>
+        <div class="text-2xl font-bold font-mono text-cyan-400" id="paper-open">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Закрито</div>
+        <div class="text-2xl font-bold font-mono" id="paper-closed">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Wins / Losses</div>
+        <div class="text-2xl font-bold font-mono">
+          <span class="up" id="paper-wins">0</span> / <span class="down" id="paper-losses">0</span>
+        </div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Avg Win / Avg Loss</div>
+        <div class="text-sm font-mono">
+          <span class="up" id="paper-avg-win">—</span> / <span class="down" id="paper-avg-loss">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Equity curve -->
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">
+        <span class="tip" data-tip="Кумулятивний P&L після кожної закритої угоди.">Equity curve (кумулятивний P&L)</span>
+      </h2>
+      <canvas id="equity-chart" height="80"></canvas>
+      <div class="hint mt-2" id="equity-hint">Очікування першої закритої угоди…</div>
+    </div>
+
+    <!-- Відкриті угоди -->
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">Відкриті угоди</h2>
+      <table>
+        <thead><tr>
+          <th>ID</th>
+          <th>Подія</th>
+          <th class="text-center">Напрямок</th>
+          <th class="text-right">Entry</th>
+          <th class="text-right">Поточна</th>
+          <th class="text-right">P&L (live)</th>
+          <th class="text-right">Розмір</th>
+          <th class="text-right">Відкрито</th>
+        </tr></thead>
+        <tbody id="paper-open-tbody"><tr><td colspan="8" class="text-slate-500">Немає відкритих угод</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- Закриті угоди -->
+    <div class="card p-4">
+      <h2 class="section-title">Історія угод</h2>
+      <table>
+        <thead><tr>
+          <th>ID</th>
+          <th>Подія</th>
+          <th class="text-center">Напрямок</th>
+          <th class="text-right">Entry</th>
+          <th class="text-right">Exit</th>
+          <th class="text-right">P&L</th>
+          <th class="text-right">P&L %</th>
+          <th class="text-right">Закрито</th>
+        </tr></thead>
+        <tbody id="paper-closed-tbody"><tr><td colspan="8" class="text-slate-500">Ще немає закритих угод</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ==================== HEATMAP ==================== -->
   <div id="tab-heatmap" style="display:none">
     <h1 class="text-2xl font-bold mb-6">Heatmap — активність новин</h1>
-
     <div class="card p-4 mb-6">
       <h2 class="section-title">
         <span class="tip" data-tip="Середня зміна ціни SOL через 15 хв після події. По горизонталі — години Києва, по вертикалі — дні тижня.">
@@ -270,7 +387,6 @@
         🟢 середнє зростання · 🔴 середнє падіння · сірий = немає даних · години показані за Києвом, наведи для UTC
       </div>
     </div>
-
     <div class="card p-4">
       <h2 class="section-title">
         <span class="tip" data-tip="Порівняння реакції SOL/BTC/ETH на ту саму подію. Excess — різниця SOL − BTC. Якщо близько 0 — новина не рухала SOL окремо від ринку.">
@@ -297,21 +413,33 @@
     <h1 class="text-2xl font-bold mb-6">Довідка</h1>
 
     <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Про час</h2>
-      <p class="text-slate-300 text-sm leading-relaxed">
-        Усі розрахунки (impact, вікна T+1, T+5, T+15, T+30, T+60) ведуться в <b>UTC</b> — це стандарт для фінансових даних.<br><br>
-        У веб-інтерфейсі час показується у <b>Europe/Kyiv (EEST, UTC+3 улітку / UTC+2 узимку)</b>
-        для зручності, а UTC — у дужках поруч.
-        Формат: <code class="bg-slate-700 px-1 rounded">18:30 (15:30 UTC)</code>.
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">💰 Paper Trading — як працює</h2>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3">
+        Автоматично відкриває віртуальні угоди, коли:
+      </p>
+      <ol class="text-sm text-slate-300 space-y-1 list-decimal list-inside ml-4">
+        <li>Подія має <b>importance = high</b></li>
+        <li>Impact розрахований, і <b>hit = HIT або MISS</b> (тобто є forecast і actual)</li>
+        <li>Hit rate по цьому title <b>≥ 60%</b> (з n ≥ 5)</li>
+        <li>Відкрито менше ніж <b>3</b> угоди одночасно</li>
+      </ol>
+      <p class="text-slate-300 text-sm leading-relaxed mt-3">
+        <b>Вхід:</b> close свічки T+1, у напрямку <code class="bg-slate-700 px-1 rounded">expected_dir</code> (long if up, short if down).<br>
+        <b>Розмір:</b> $10 за угоду.<br>
+        <b>Комісія:</b> 0.1% (Bybit taker) + slippage 0.05%.<br>
+        <b>Вихід:</b> close свічки T+60.<br>
+        <b>Символ:</b> SOLUSDT.
+      </p>
+      <p class="text-slate-300 text-sm leading-relaxed mt-3">
+        Усі угоди — <b>віртуальні</b>. Реальні ордери на Bybit <b>не відправляються</b>.
       </p>
     </div>
 
     <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Що це за проєкт</h2>
-      <p class="text-slate-300 leading-relaxed">
-        Система моніторить економічні новини (ForexFactory), записує ціни <b>SOL</b>, <b>BTC</b> і <b>ETH</b> з Bybit
-        у реальному часі та розраховує <b>вплив</b> кожної новини на ціну.
-        Мета — знайти статистичні закономірності: чи реагують крипто-ринки на конкретні події передбачувано.
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Про час</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Усі розрахунки (impact, вікна T+1, T+5, T+15, T+30, T+60) ведуться в <b>UTC</b>.<br>
+        У веб-інтерфейсі час показується у <b>Europe/Kyiv</b>, UTC — у дужках.
       </p>
     </div>
 
@@ -319,78 +447,45 @@
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Основні терміни</h2>
       <dl class="space-y-3 text-sm">
         <div>
-          <dt class="font-semibold text-white">Подія (Event)</dt>
-          <dd class="text-slate-300 ml-4">Запланована публікація економічних даних (CPI, NFP, FOMC) або виступ чиновника. Має точний час в UTC.</dd>
-        </div>
-        <div>
           <dt class="font-semibold text-white">Baseline (T-1)</dt>
-          <dd class="text-slate-300 ml-4">Ціна за 1 хвилину ДО події. Від неї рахуються всі зміни.</dd>
-        </div>
-        <div>
-          <dt class="font-semibold text-white">Ret N хв (%)</dt>
-          <dd class="text-slate-300 ml-4">Зміна ціни через N хвилин після події, у %.</dd>
+          <dd class="text-slate-300 ml-4">Ціна за 1 хвилину ДО події.</dd>
         </div>
         <div>
           <dt class="font-semibold text-white">Напрямок (Direction)</dt>
           <dd class="text-slate-300 ml-4">
-            <span class="up">up</span> — виросла більше порогу,
-            <span class="down">down</span> — впала більше порогу,
-            <span class="flat">flat</span> — у межах порогу.
+            <span class="up">up</span> / <span class="down">down</span> / <span class="flat">flat</span>
           </dd>
         </div>
         <div>
           <dt class="font-semibold text-white">Очікуваний напрямок (Expected)</dt>
           <dd class="text-slate-300 ml-4">
             Куди "мала би" піти ціна на основі <b>actual vs forecast</b>.
-            Наприклад: CPI вище прогнозу → hawkish Fed → очікується <span class="down">down</span>.
           </dd>
         </div>
         <div>
           <dt class="font-semibold text-white">Hit / Miss / Neutral / N/A / NO_DATA</dt>
           <dd class="text-slate-300 ml-4">
-            <span class="badge-hit px-2 py-0.5 rounded text-xs">HIT</span> — очікуваний напрямок збігся з фактичним,<br>
-            <span class="badge-miss px-2 py-0.5 rounded text-xs">MISS</span> — не збігся,<br>
-            <span class="badge-neutral px-2 py-0.5 rounded text-xs">NEUTRAL</span> — очікуваний або фактичний напрямок = flat,<br>
-            <span class="badge-na px-2 py-0.5 rounded text-xs">N/A</span> — немає expected через відсутнє правило,<br>
-            <span class="badge-na px-2 py-0.5 rounded text-xs">—</span> (<b>NO_DATA</b>) — взагалі немає forecast/actual (наприклад, виступи чи GDP/PCE, де ForexFactory не дає actual).
+            <span class="badge-hit px-2 py-0.5 rounded text-xs">HIT</span> — справдився,<br>
+            <span class="badge-miss px-2 py-0.5 rounded text-xs">MISS</span> — не справдився,<br>
+            <span class="badge-neutral px-2 py-0.5 rounded text-xs">NEUTRAL</span> — у межах порогу,<br>
+            <span class="badge-na px-2 py-0.5 rounded text-xs">N/A</span> — немає правила,<br>
+            <span class="badge-na px-2 py-0.5 rounded text-xs">—</span> (<b>NO_DATA</b>) — немає forecast/actual.
           </dd>
         </div>
         <div>
           <dt class="font-semibold text-white">Hit Rate</dt>
           <dd class="text-slate-300 ml-4">
             <code class="bg-slate-700 px-1 rounded">HIT / (HIT + MISS) × 100</code>.
-            Показує, наскільки ринок реагує "логічно" на подію.
-            <b>NO_DATA і N/A не враховуються</b>.
-            <b>n ≥ 20-30</b> для статистичної значущості.
+            NO_DATA і N/A не враховуються.
           </dd>
         </div>
         <div>
-          <dt class="font-semibold text-white">Cross-asset / Excess</dt>
+          <dt class="font-semibold text-white">Excess SOL vs BTC</dt>
           <dd class="text-slate-300 ml-4">
-            Порівняння реакції SOL, BTC, ETH на ту саму подію.
-            <b>Excess = Avg SOL − Avg BTC</b>. Якщо близько 0 — SOL просто слідує за ринком, а не реагує самостійно.
-          </dd>
-        </div>
-        <div>
-          <dt class="font-semibold text-white">LIVE-стрічка</dt>
-          <dd class="text-slate-300 ml-4">
-            Показує події в ±2 хв від поточного часу з цінами в реальному часі.
-            Оновлюється кожні 2 секунди.
+            Avg SOL − Avg BTC. Якщо близько 0 — SOL просто слідує за ринком.
           </dd>
         </div>
       </dl>
-    </div>
-
-    <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Як читати статистику</h2>
-      <ul class="text-sm text-slate-300 space-y-2 list-disc list-inside">
-        <li><b>n &lt; 10</b> — статистика ненадійна.</li>
-        <li><b>Hit Rate ≥ 60%</b> на 30+ подіях — є статистична перевага.</li>
-        <li><b>Hit Rate ≈ 50%</b> — новина не має передбачуваного впливу.</li>
-        <li><b>Avg +1хв великий, +15хв ≈ 0</b> — це шпилька (spike), заробити неможливо.</li>
-        <li><b>Cross-asset кореляція &gt; 70%</b> — SOL просто слідує за BTC.</li>
-        <li><b>Excess ≈ 0</b> — новина не рухає SOL окремо від загального ринку.</li>
-      </ul>
     </div>
 
     <div class="card p-6">
@@ -399,7 +494,6 @@
         <li><b>Новини:</b> ForexFactory (парсинг HTML).</li>
         <li><b>Ціни:</b> Bybit Spot API (WebSocket + REST).</li>
         <li><b>Символи:</b> SOLUSDT, BTCUSDT, ETHUSDT.</li>
-        <li><b>Комісії Bybit spot:</b> Maker 0.1%, Taker 0.1%.</li>
       </ul>
     </div>
   </div>
@@ -421,9 +515,7 @@ const LOCAL_TZ = 'Europe/Kyiv';
 
 function parseUtc(isoStr) {
   if (!isoStr) return null;
-  if (!isoStr.endsWith('Z') && !isoStr.includes('+')) {
-    isoStr += 'Z';
-  }
+  if (!isoStr.endsWith('Z') && !isoStr.includes('+')) isoStr += 'Z';
   return new Date(isoStr);
 }
 
@@ -433,15 +525,6 @@ function fmtLocalTime(isoStr) {
   return d.toLocaleTimeString('uk-UA', {
     timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false
   });
-}
-
-function fmtLocalDateTime(isoStr) {
-  const d = parseUtc(isoStr);
-  if (!d) return '—';
-  return d.toLocaleString('uk-UA', {
-    timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false
-  }).replace(',', '');
 }
 
 function fmtBoth(isoStr) {
@@ -491,11 +574,12 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    ['live','dashboard','events','impact','heatmap','help'].forEach(name => {
+    ['live','dashboard','events','impact','paper','heatmap','help'].forEach(name => {
       document.getElementById('tab-' + name).style.display = name === t.dataset.tab ? '' : 'none';
     });
     if (t.dataset.tab === 'events') loadEvents();
     if (t.dataset.tab === 'impact') loadImpact();
+    if (t.dataset.tab === 'paper') loadPaper();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
   };
@@ -503,6 +587,8 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
 
 // ==================== HELPERS ====================
 const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(3) + '%';
+const fmtUsd = v => v == null ? '—' : '$' + v.toFixed(2);
+const fmtUsd4 = v => v == null ? '—' : '$' + v.toFixed(4);
 const clsFor = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
 const clsForDir = d => d === 'up' ? 'up' : d === 'down' ? 'down' : 'flat';
 const badge = imp => `<span class="badge-${imp} px-2 py-0.5 rounded text-xs">${imp}</span>`;
@@ -512,6 +598,18 @@ const hitBadge = h => {
   if (h === 'NO_DATA') return '<span class="badge-na px-2 py-0.5 rounded text-xs" title="Немає forecast/actual для розрахунку hit">—</span>';
   const cls = {'HIT':'badge-hit','MISS':'badge-miss','NEUTRAL':'badge-neutral','N/A':'badge-na'}[h] || 'badge-na';
   return `<span class="${cls} px-2 py-0.5 rounded text-xs">${h}</span>`;
+};
+
+const dirBadge = d => {
+  if (d === 'long') return '<span class="badge-long px-2 py-0.5 rounded text-xs">LONG</span>';
+  if (d === 'short') return '<span class="badge-short px-2 py-0.5 rounded text-xs">SHORT</span>';
+  return '—';
+};
+
+const statusBadge = s => {
+  if (s === 'OPEN') return '<span class="badge-open px-2 py-0.5 rounded text-xs">OPEN</span>';
+  if (s === 'CLOSED') return '<span class="badge-closed px-2 py-0.5 rounded text-xs">CLOSED</span>';
+  return s || '—';
 };
 
 async function api(path, opts = {}) {
@@ -530,7 +628,9 @@ function metric(label, value, cls, tip) {
 // ==================== STATE ====================
 let priceChart = null;
 let hitChart = null;
+let equityChart = null;
 let currentChartHours = 1;
+let currentPrices = {};   // symbol -> last close
 
 // ==================== LIVE ====================
 function fmtSeconds(s) {
@@ -796,6 +896,17 @@ async function loadDashboard() {
         'Розподіл напрямків через 15 хвилин.')}
     `;
   }
+
+  // Оновлюємо nav equity
+  try {
+    const acc = await api('/paper/account');
+    if (!acc.error) {
+      const eq = acc.equity;
+      const el = document.getElementById('nav-equity');
+      el.textContent = fmtUsd(eq);
+      el.className = 'equity-badge tip ' + clsFor(acc.total_pnl);
+    }
+  } catch (_) {}
 }
 
 // ==================== EVENTS ====================
@@ -887,6 +998,167 @@ async function loadImpact() {
       }
     });
   }
+}
+
+// ==================== PAPER ====================
+async function loadPaper() {
+  // 1. Акаунт
+  const acc = await api('/paper/account');
+  if (!acc.error) {
+    document.getElementById('paper-initial').textContent = fmtUsd(acc.initial_balance);
+    document.getElementById('paper-equity').textContent = fmtUsd(acc.equity);
+    document.getElementById('paper-equity').className = 'text-3xl font-bold font-mono ' + clsFor(acc.total_pnl);
+    document.getElementById('paper-equity-hint').textContent =
+      `Balance ${fmtUsd(acc.balance)} + frozen ${fmtUsd(acc.frozen)}`;
+
+    const pnlSign = acc.total_pnl >= 0 ? '+' : '';
+    document.getElementById('paper-pnl').textContent = `${pnlSign}${fmtUsd(acc.total_pnl)}`;
+    document.getElementById('paper-pnl').className = 'text-3xl font-bold font-mono ' + clsFor(acc.total_pnl);
+    document.getElementById('paper-pnl-pct').textContent =
+      `${pnlSign}${acc.total_pnl_pct.toFixed(3)}%`;
+
+    document.getElementById('paper-winrate').textContent =
+      acc.win_rate == null ? '—' : acc.win_rate.toFixed(1) + '%';
+    document.getElementById('paper-winrate').className =
+      'text-3xl font-bold font-mono ' + (acc.win_rate == null ? 'flat' : acc.win_rate >= 50 ? 'up' : 'down');
+    document.getElementById('paper-trades-count').textContent =
+      `${acc.total_trades} угод (${acc.closed_trades} закр.)`;
+
+    document.getElementById('paper-open').textContent = acc.open_trades;
+    document.getElementById('paper-closed').textContent = acc.closed_trades;
+    document.getElementById('paper-wins').textContent = acc.wins;
+    document.getElementById('paper-losses').textContent = acc.losses;
+    document.getElementById('paper-avg-win').textContent =
+      acc.avg_win == null ? '—' : '+' + fmtUsd(acc.avg_win);
+    document.getElementById('paper-avg-loss').textContent =
+      acc.avg_loss == null ? '—' : fmtUsd(acc.avg_loss);
+  }
+
+  // 2. Equity curve
+  const curve = await api('/paper/equity_curve');
+  if (equityChart) equityChart.destroy();
+  if (curve.length === 0) {
+    document.getElementById('equity-hint').textContent = 'Очікування першої закритої угоди…';
+  } else {
+    document.getElementById('equity-hint').textContent =
+      `${curve.length} закритих угод, фінальний cumulative: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
+
+    const labels = curve.map(p => {
+      const d = new Date(p.ts.replace(' ', 'T') + 'Z');
+      return d.toLocaleString('uk-UA', {
+        timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+      }).replace(',', '');
+    });
+    const data = curve.map(p => p.cum_pnl);
+
+    equityChart = new Chart(document.getElementById('equity-chart'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Cumulative P&L, $',
+          data,
+          borderColor: '#22d3ee',
+          backgroundColor: 'rgba(34,211,238,0.1)',
+          borderWidth: 2, tension: 0.2, pointRadius: 3, fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#e2e8f0' } } },
+        scales: {
+          x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
+               title: { display: true, text: 'P&L, $', color: '#94a3b8' } },
+        }
+      }
+    });
+  }
+
+  // 3. Угоди
+  const trades = await api('/paper/trades?limit=100');
+  const openTrades = trades.filter(t => t.status === 'OPEN');
+  const closedTrades = trades.filter(t => t.status === 'CLOSED');
+
+  // 3a. Відкриті
+  const openTbody = document.getElementById('paper-open-tbody');
+  if (openTrades.length === 0) {
+    openTbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">Немає відкритих угод</td></tr>';
+  } else {
+    openTbody.innerHTML = openTrades.map(t => {
+      // Спроба розрахувати live P&L
+      const current = currentPrices[t.symbol];
+      let livePnl = '—';
+      let liveCls = 'flat';
+      if (current && t.entry_price) {
+        const qty = t.size_usd / t.entry_price;
+        const gross = qty * current;
+        const exitFee = gross * 0.001;
+        const net = gross - exitFee;
+        const cost = t.size_usd + t.entry_fee;
+        const pnl = net - cost;
+        livePnl = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(4);
+        liveCls = clsFor(pnl);
+      }
+      return `
+        <tr>
+          <td class="font-mono text-xs text-slate-500">${t.id}</td>
+          <td class="text-cyan-400">${t.event_title}</td>
+          <td class="text-center">${dirBadge(t.direction)}</td>
+          <td class="text-right font-mono">${fmtUsd4(t.entry_price)}</td>
+          <td class="text-right font-mono">${current ? fmtUsd4(current) : '—'}</td>
+          <td class="text-right font-mono ${liveCls}">${livePnl}</td>
+          <td class="text-right font-mono">${fmtUsd(t.size_usd)}</td>
+          <td class="text-right font-mono text-xs">${fmtBothFull(t.event_time)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // 3b. Закриті
+  const closedTbody = document.getElementById('paper-closed-tbody');
+  if (closedTrades.length === 0) {
+    closedTbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">Ще немає закритих угод</td></tr>';
+  } else {
+    closedTbody.innerHTML = closedTrades.map(t => {
+      const pnlSign = (t.pnl || 0) >= 0 ? '+' : '';
+      const closedTs = t.closed_at ? t.closed_at.replace(' ', 'T') + 'Z' : null;
+      return `
+        <tr>
+          <td class="font-mono text-xs text-slate-500">${t.id}</td>
+          <td class="text-cyan-400">${t.event_title}</td>
+          <td class="text-center">${dirBadge(t.direction)}</td>
+          <td class="text-right font-mono">${fmtUsd4(t.entry_price)}</td>
+          <td class="text-right font-mono">${fmtUsd4(t.exit_price)}</td>
+          <td class="text-right font-mono ${clsFor(t.pnl)}">${pnlSign}${fmtUsd(t.pnl)}</td>
+          <td class="text-right font-mono ${clsFor(t.pnl)}">${pnlSign}${(t.pnl_pct || 0).toFixed(3)}%</td>
+          <td class="text-right font-mono text-xs">${closedTs ? fmtBothFull(closedTs) : '—'}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Оновлюємо nav equity
+  if (!acc.error) {
+    const el = document.getElementById('nav-equity');
+    el.textContent = fmtUsd(acc.equity);
+    el.className = 'equity-badge tip ' + clsFor(acc.total_pnl);
+  }
+}
+
+async function runPaperEngine() {
+  if (!confirm('Запустити paper engine вручну?')) return;
+  const r = await api('/paper/run', { method: 'POST' });
+  alert(`Готово: ${JSON.stringify(r)}`);
+  loadPaper();
+}
+
+async function resetPaper() {
+  if (!confirm('Скинути акаунт до $100 і видалити всі угоди?')) return;
+  await api('/paper/reset', { method: 'POST' });
+  alert('Акаунт скинуто');
+  loadPaper();
 }
 
 // ==================== HEATMAP ====================
@@ -1012,7 +1284,7 @@ async function openEvent(id) {
 
     body += `<h3 class="font-semibold mb-2">Вплив на ${i.symbol || 'SOLUSDT'}</h3>
       <div class="text-xs text-slate-400 mb-2">
-        Baseline (T-1): <span class="font-mono text-white">$${i.price_baseline ? i.price_baseline.toFixed(4) : '—'}</span>
+        Baseline (T-1): <span class="font-mono text-white">${fmtUsd4(i.price_baseline)}</span>
         · Поріг: <span class="font-mono text-white">${i.threshold_pct ? i.threshold_pct.toFixed(3) : '—'}%</span>
       </div>
       <table><thead><tr>
@@ -1022,7 +1294,7 @@ async function openEvent(id) {
     for (const w of [1,5,15,30,60]) {
       body += `<tr>
         <td>T+${w}хв</td>
-        <td class="text-right font-mono">${i['price_t'+w] ? '$'+i['price_t'+w].toFixed(4) : '—'}</td>
+        <td class="text-right font-mono">${i['price_t'+w] ? fmtUsd4(i['price_t'+w]) : '—'}</td>
         <td class="text-right font-mono ${clsFor(i['ret_'+w+'m'])}">${fmtPct(i['ret_'+w+'m'])}</td>
         <td class="text-right ${clsForDir(i['dir_'+w+'m'])}">${i['dir_'+w+'m'] || '—'}</td>
       </tr>`;
@@ -1065,10 +1337,18 @@ async function runRecompute() {
         const msg = JSON.parse(e.data);
         if (msg.type === 'calendar_refreshed') loadDashboard();
         if (msg.type === 'impact_recomputed') loadDashboard();
+        if (msg.type === 'paper_updated') {
+          const tab = document.querySelector('.tab.active');
+          if (tab && tab.dataset.tab === 'paper') loadPaper();
+        }
         if (msg.type === 'live_update') {
           const liveTab = document.getElementById('tab-live');
-          if (liveTab && liveTab.style.display !== 'none') {
-            renderLiveList(msg.data);
+          if (liveTab && liveTab.style.display !== 'none') renderLiveList(msg.data);
+          // Оновлюємо currentPrices для live P&L
+          for (const item of (msg.data.active || [])) {
+            for (const sym of ['SOLUSDT','BTCUSDT','ETHUSDT']) {
+              if (item.symbols[sym]) currentPrices[sym] = item.symbols[sym].current;
+            }
           }
         }
       } catch (_) {}
@@ -1082,14 +1362,60 @@ loadDashboard();
 
 setInterval(() => {
   const active = document.querySelector('.tab.active');
-  if (active && active.dataset.tab === 'dashboard') loadDashboard();
-  if (active && active.dataset.tab === 'live') loadLive();
+  if (!active) return;
+  if (active.dataset.tab === 'dashboard') loadDashboard();
+  if (active.dataset.tab === 'live') loadLive();
+  if (active.dataset.tab === 'paper') loadPaper();
 }, 30000);
 
 setInterval(() => {
   const active = document.querySelector('.tab.active');
   if (active && active.dataset.tab === 'live') loadLive();
 }, 3000);
+
+// Оновлення цін кожні 10 сек (для live P&L у paper)
+setInterval(async () => {
+  try {
+    const data = await api('/prices/latest?limit=3');
+    for (const p of data) currentPrices[p.symbol] = p.close;
+    const active = document.querySelector('.tab.active');
+    if (active && active.dataset.tab === 'paper') {
+      // Тихо перемалювати live P&L без перезавантаження
+      const acc = await api('/paper/account');
+      const trades = await api('/paper/trades?status=OPEN');
+      const tbody = document.getElementById('paper-open-tbody');
+      if (tbody && trades.length > 0) {
+        tbody.innerHTML = trades.map(t => {
+          const current = currentPrices[t.symbol];
+          let livePnl = '—';
+          let liveCls = 'flat';
+          if (current && t.entry_price) {
+            const qty = t.size_usd / t.entry_price;
+            const gross = qty * current;
+            const exitFee = gross * 0.001;
+            const net = gross - exitFee;
+            const cost = t.size_usd + t.entry_fee;
+            const pnl = net - cost;
+            livePnl = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(4);
+            liveCls = clsFor(pnl);
+          }
+          return `
+            <tr>
+              <td class="font-mono text-xs text-slate-500">${t.id}</td>
+              <td class="text-cyan-400">${t.event_title}</td>
+              <td class="text-center">${dirBadge(t.direction)}</td>
+              <td class="text-right font-mono">${fmtUsd4(t.entry_price)}</td>
+              <td class="text-right font-mono">${current ? fmtUsd4(current) : '—'}</td>
+              <td class="text-right font-mono ${liveCls}">${livePnl}</td>
+              <td class="text-right font-mono">${fmtUsd(t.size_usd)}</td>
+              <td class="text-right font-mono text-xs">${fmtBothFull(t.event_time)}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+  } catch (_) {}
+}, 10000);
 </script>
 </body>
 </html>
