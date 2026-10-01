@@ -1,5 +1,12 @@
 """
 Paper Trading Engine: відкриття та закриття віртуальних угод.
+
+Режим: SPOT + LONG-only (Варіант A).
+- Відкриваємо тільки LONG (expected_dir = "up")
+- Події з expected_dir = "down" — пропускаємо (на споті не можна шортити)
+- Розмір: $10
+- Комісія: 0.1% (Bybit spot taker) + slippage 0.05%
+- Вихід: close свічки T+60
 """
 
 import logging
@@ -12,14 +19,19 @@ from app.bot.notifier import get_bot
 
 logger = logging.getLogger(__name__)
 
-# Параметри стратегії
+# --- Параметри стратегії ---
 SYMBOL = "SOLUSDT"
 TRADE_SIZE_USD = 10.0
-COMMISSION_PCT = 0.1        # 0.1% Bybit taker
+COMMISSION_PCT = 0.1        # 0.1% Bybit spot taker
 SLIPPAGE_PCT = 0.05         # 0.05% slippage
 HIT_RATE_THRESHOLD = 60.0   # %
-MIN_EVENTS_FOR_TRUST = 5    # мінімум n для title
+MIN_EVENTS_FOR_TRUST = 1    # ТЕСТ: 1 (для продакшену — 5)
 MAX_OPEN_TRADES = 3
+
+# --- Режим торгівлі ---
+# True  → SPOT + LONG-only (не можемо шортити)
+# False → дозволити SHORT (для ф'ючерсів)
+SPOT_LONG_ONLY = True
 
 
 async def process_paper_engine() -> dict:
@@ -31,18 +43,18 @@ async def process_paper_engine() -> dict:
     stats = {"closed": 0, "opened": 0}
 
     async with get_db() as db:
-        # --- 1. Закриваємо прострочені ---
         stats["closed"] = await _close_expired_trades(db)
-
-        # --- 2. Відкриваємо нові ---
         stats["opened"] = await _open_new_trades(db)
-
         await db.commit()
 
     if stats["closed"] or stats["opened"]:
         logger.info(f"Paper engine: {stats}")
     return stats
 
+
+# ---------------------------------------------------------------------------
+# Закриття
+# ---------------------------------------------------------------------------
 
 async def _close_expired_trades(db) -> int:
     """Закриває угоди, у яких T+60 хв уже минув."""
@@ -66,7 +78,6 @@ async def _close_expired_trades(db) -> int:
         if now_ms < exit_ts:
             continue  # ще не час
 
-        # Беремо close свічки T+60
         cur = await db.execute("""
             SELECT close FROM prices
             WHERE symbol = ? AND interval = '1' AND confirm = 1
@@ -86,28 +97,50 @@ async def _close_expired_trades(db) -> int:
 
 
 async def _close_trade(db, trade, exit_price: float, exit_ts: int):
-    """Розраховує P&L, комісії, оновлює баланс, шле сповіщення."""
+    """
+    Розраховує P&L з УРАХУВАННЯМ напрямку (long/short),
+    оновлює баланс, шле сповіщення.
+
+    Логіка LONG:
+      - купуємо qty = size_usd / entry_price за entry_price
+      - продаємо qty за exit_price
+      - P&L = qty * (exit − entry) − fees
+
+    Логіка SHORT:
+      - продаємо qty = size_usd / entry_price за entry_price
+      - купуємо qty назад за exit_price
+      - P&L = qty * (entry − exit) − fees
+    """
     entry_price = float(trade["entry_price"])
     size_usd = float(trade["size_usd"])
     direction = trade["direction"]  # 'long' | 'short'
+    entry_fee = float(trade["entry_fee"])
 
-    # Симуляція: купуємо size_usd / entry_price одиниць
     qty = size_usd / entry_price
 
-    # Виручка від продажу з урахуванням slippage на виході
+    # Slippage на виході (гірша ціна для нас)
     if direction == "long":
         exit_price_eff = exit_price * (1 - SLIPPAGE_PCT / 100)
-    else:
+    else:  # short
         exit_price_eff = exit_price * (1 + SLIPPAGE_PCT / 100)
 
-    gross_value = qty * exit_price_eff
-    exit_fee = gross_value * (COMMISSION_PCT / 100)
-    net_value = gross_value - exit_fee
+    # Комісія на виході (від обсягу виходу)
+    exit_notional = qty * exit_price_eff
+    exit_fee = exit_notional * (COMMISSION_PCT / 100)
 
-    # P&L: те, що отримали на виході мінус те, що витратили на вході
-    entry_cost = size_usd + float(trade["entry_fee"])
-    pnl = net_value - entry_cost
-    pnl_pct = (pnl / entry_cost) * 100
+    # P&L з урахуванням напрямку
+    if direction == "long":
+        gross_pnl = qty * (exit_price_eff - entry_price)
+    else:  # short
+        gross_pnl = qty * (entry_price - exit_price_eff)
+
+    pnl = gross_pnl - entry_fee - exit_fee
+    pnl_pct = (pnl / size_usd) * 100
+
+    # Повертаємо на баланс: size_usd (тіло) + pnl
+    # При long: ми інвестували size_usd, отримали назад size_usd + gross_pnl − fees
+    # При short: ми «позичили» size_usd, повернули size_usd + gross_pnl − fees
+    return_amount = size_usd + pnl
 
     # Оновлюємо угоду
     await db.execute("""
@@ -124,7 +157,7 @@ async def _close_trade(db, trade, exit_price: float, exit_ts: int):
         SET balance = balance + ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = 1
-    """, (net_value,))
+    """, (return_amount,))
 
     # --- Telegram ---
     emoji = "✅" if pnl > 0 else "❌"
@@ -137,20 +170,28 @@ async def _close_trade(db, trade, exit_price: float, exit_ts: int):
     )
     await _notify(text)
 
-    logger.info(f"[trade {trade['id']}] closed: pnl={pnl:.4f} ({pnl_pct:.3f}%)")
+    logger.info(
+        f"[trade {trade['id']}] closed {direction}: "
+        f"entry={entry_price:.4f} exit={exit_price_eff:.4f} "
+        f"pnl={pnl:.4f} ({pnl_pct:.3f}%)"
+    )
 
+
+# ---------------------------------------------------------------------------
+# Відкриття
+# ---------------------------------------------------------------------------
 
 async def _open_new_trades(db) -> int:
     """
     Шукає події, для яких:
       - impact розрахований (для SOL)
       - є expected_dir (не None)
-      - hit rate по цьому title >= 60% (з n >= 5)
+      - hit rate по цьому title >= 60% (з n >= MIN_EVENTS_FOR_TRUST)
       - немає ще відкритої угоди
       - T+1 вже минув, T+60 ще не минув
       - кількість відкритих < MAX_OPEN_TRADES
+      - напрямок дозволений (при SPOT_LONG_ONLY — тільки up)
     """
-    # Скільки зараз відкрито?
     cur = await db.execute("SELECT COUNT(*) AS n FROM paper_trades WHERE status='OPEN'")
     open_count = (await cur.fetchone())["n"]
     if open_count >= MAX_OPEN_TRADES:
@@ -158,7 +199,6 @@ async def _open_new_trades(db) -> int:
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    # Знайти події з impact для SOL, hit != NO_DATA
     cur = await db.execute("""
         SELECT
             e.id AS event_id, e.title, e.importance, e.time_utc,
@@ -185,7 +225,18 @@ async def _open_new_trades(db) -> int:
         if open_count + opened >= MAX_OPEN_TRADES:
             break
 
-        # Перевірка hit rate для цього title
+        # --- Визначаємо напрямок ---
+        direction = "long" if c["expected_dir"] == "up" else "short"
+
+        # --- SPOT mode: пропускаємо SHORT ---
+        if SPOT_LONG_ONLY and direction == "short":
+            logger.debug(
+                f"[event {c['event_id']}] пропущено: expected_dir=down "
+                f"(SPOT_LONG_ONLY=True)"
+            )
+            continue
+
+        # --- Перевірка hit rate для цього title ---
         cur = await db.execute("""
             SELECT
                 SUM(CASE WHEN hit='HIT' THEN 1 ELSE 0 END) AS hits,
@@ -201,25 +252,31 @@ async def _open_new_trades(db) -> int:
         misses = hr["misses"] or 0
         total = hits + misses
         if total < MIN_EVENTS_FOR_TRUST:
+            logger.debug(
+                f"[event {c['event_id']}] пропущено: n={total} < "
+                f"{MIN_EVENTS_FOR_TRUST}"
+            )
             continue
         hit_rate = (hits / total * 100) if total > 0 else 0
         if hit_rate < HIT_RATE_THRESHOLD:
+            logger.debug(
+                f"[event {c['event_id']}] пропущено: hit_rate={hit_rate:.0f}% < "
+                f"{HIT_RATE_THRESHOLD}%"
+            )
             continue
 
-        # Перевірка таймінгу: T+1 минув, T+60 ще ні
+        # --- Таймінг ---
         event_ts = _iso_to_ms(c["time_utc"])
         if event_ts is None:
             continue
-        entry_ts = event_ts + 60_000   # T+1
-        exit_ts = event_ts + 60 * 60_000  # T+60
+        entry_ts = event_ts + 60_000
+        exit_ts = event_ts + 60 * 60_000
         if now_ms < entry_ts:
             continue
         if now_ms > exit_ts:
-            # вікно минуло, але угоди не було — пропускаємо, щоб не відкривати «заднім числом»
-            continue
+            continue  # вікно минуло
 
-        # Вхід
-        direction = "long" if c["expected_dir"] == "up" else "short"
+        # --- Вхід ---
         entry_price = float(c["price_t1"])
 
         # Slippage на вході
@@ -251,7 +308,7 @@ async def _open_new_trades(db) -> int:
 
         opened += 1
 
-        # Telegram
+        # --- Telegram ---
         dir_emoji = "🟢" if direction == "long" else "🔴"
         text = (
             f"{dir_emoji} *Відкрито {direction.upper()} {SYMBOL}*\n"
@@ -262,8 +319,11 @@ async def _open_new_trades(db) -> int:
             f"Розмір: ${TRADE_SIZE_USD:.2f}"
         )
         await _notify(text)
-        logger.info(f"[paper] opened {direction} on event {c['event_id']} "
-                    f"@ {entry_price_eff:.4f}")
+
+        logger.info(
+            f"[paper] opened {direction} on event {c['event_id']} "
+            f"@ {entry_price_eff:.4f} (hit_rate={hit_rate:.0f}%)"
+        )
 
     return opened
 
