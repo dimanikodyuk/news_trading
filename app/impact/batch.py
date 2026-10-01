@@ -19,14 +19,27 @@ async def process_all_past_events(limit: int = 500) -> dict:
     stats = {"processed": 0, "saved": 0, "skipped": 0, "errors": 0}
 
     async with get_db() as db:
+        # Перераховуємо події, якщо:
+        #   1) немає жодного impact (нова подія), АБО
+        #   2) hit = 'NO_DATA', але тепер є actual_value (треба перерахувати)
         cur = await db.execute("""
             SELECT e.* FROM events e
             WHERE e.time_utc < ?
               AND e.importance IN ('high', 'medium')
               AND (
-                SELECT COUNT(*) FROM event_impact ei
-                WHERE ei.event_id = e.id AND ei.ret_60m IS NOT NULL
-              ) < 3
+                -- Немає жодного impact з повними даними
+                (SELECT COUNT(*) FROM event_impact ei
+                 WHERE ei.event_id = e.id AND ei.ret_60m IS NOT NULL) < 3
+                OR
+                -- Або hit = NO_DATA, але тепер є actual → треба перерахувати
+                EXISTS (
+                    SELECT 1 FROM event_impact ei
+                    WHERE ei.event_id = e.id
+                      AND ei.hit = 'NO_DATA'
+                      AND e.actual_value IS NOT NULL
+                      AND e.actual_value != ''
+                )
+              )
             ORDER BY e.time_utc DESC
             LIMIT ?
         """, (now_iso, limit))
