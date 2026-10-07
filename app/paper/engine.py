@@ -1,8 +1,9 @@
 """
 Paper Trading Engine: відкриття та закриття віртуальних угод.
 
-Режим: SPOT + LONG-only.
-Символи: SOLUSDT + BTCUSDT (по одній угоді на кожен символ на подію).
+Режим: LONG + SHORT (симуляція).
+Символи: SOLUSDT + BTCUSDT.
+Фільтр руху: PAPER_MIN_MOVE_PCT — не торгуємо, якщо |ret_15m| < 0.30%.
 """
 
 import logging
@@ -16,18 +17,23 @@ from app.bot.notifier import get_bot
 logger = logging.getLogger(__name__)
 
 # --- Символи для paper trading ---
-# Порядок важливий: визначає, в якому порядку відкриваються угоди
 TRADE_SYMBOLS = ["SOLUSDT", "BTCUSDT"]
 
 # --- Параметри стратегії ---
 TRADE_SIZE_USD = 10.0
 COMMISSION_PCT = 0.1        # 0.1% Bybit spot taker
 SLIPPAGE_PCT = 0.05         # 0.05% slippage
-HIT_RATE_THRESHOLD = 50.0   # %
+HIT_RATE_THRESHOLD = 60.0   # %
 MIN_EVENTS_FOR_TRUST = 1    # ТЕСТ: 1 (для продакшену — 5)
 MAX_OPEN_TRADES = 6         # 3 на символ × 2 символи
 
+# --- Мінімальний рух для торгівлі ---
+# Якщо |ret_15m| < цього значення — пропускаємо (немає сенсу, комісії з'їдять)
+PAPER_MIN_MOVE_PCT = 0.30
+
 # --- Режим торгівлі ---
+# True  → тільки LONG (SPOT)
+# False → LONG + SHORT (симуляція, для майбутніх ф'ючерсів)
 SPOT_LONG_ONLY = False
 
 
@@ -177,6 +183,9 @@ async def _open_new_trades(db) -> int:
     """, (len(TRADE_SYMBOLS),))
     candidates = await cur.fetchall()
 
+    if candidates:
+        logger.info(f"[paper] Знайдено {len(candidates)} подій-кандидатів")
+
     opened = 0
     for c in candidates:
         if open_count + opened >= MAX_OPEN_TRADES:
@@ -189,8 +198,10 @@ async def _open_new_trades(db) -> int:
         entry_ts = event_ts + 60_000
         exit_ts = event_ts + 60 * 60_000
         if now_ms < entry_ts:
+            logger.debug(f"[paper] {c['title']}: ще не час (entry_ts у майбутньому)")
             continue
         if now_ms > exit_ts:
+            logger.debug(f"[paper] {c['title']}: вікно минуло")
             continue
 
         # Hit rate по title (на основі SOL)
@@ -207,9 +218,11 @@ async def _open_new_trades(db) -> int:
         misses = hr["misses"] or 0
         total = hits + misses
         if total < MIN_EVENTS_FOR_TRUST:
+            logger.debug(f"[paper] {c['title']}: n={total} < {MIN_EVENTS_FOR_TRUST}")
             continue
         hit_rate = (hits / total * 100) if total > 0 else 0
         if hit_rate < HIT_RATE_THRESHOLD:
+            logger.debug(f"[paper] {c['title']}: hit_rate={hit_rate:.0f}% < {HIT_RATE_THRESHOLD}%")
             continue
 
         # Для КОЖНОГО символу окремо
@@ -217,7 +230,7 @@ async def _open_new_trades(db) -> int:
             if open_count + opened >= MAX_OPEN_TRADES:
                 break
 
-            # Перевірка, чи вже є угода для цього (event, symbol)
+            # Чи вже є угода для цього (event, symbol)?
             cur = await db.execute("""
                 SELECT 1 FROM paper_trades
                 WHERE event_id = ? AND symbol = ?
@@ -227,7 +240,7 @@ async def _open_new_trades(db) -> int:
 
             # Impact для цього символу
             cur = await db.execute("""
-                SELECT expected_dir, hit, price_t1
+                SELECT expected_dir, hit, price_t1, ret_15m
                 FROM event_impact
                 WHERE event_id = ? AND symbol = ?
                   AND expected_dir IS NOT NULL
@@ -238,8 +251,18 @@ async def _open_new_trades(db) -> int:
             if not row:
                 continue
 
+            # === ПЕРЕВІРКА МІНІМАЛЬНОГО РУХУ ===
+            ret_15 = row["ret_15m"]
+            if ret_15 is None or abs(ret_15) < PAPER_MIN_MOVE_PCT:
+                logger.debug(
+                    f"[paper] skip {sym} '{c['title']}': "
+                    f"|ret_15m| = {abs(ret_15 or 0):.3f}% < {PAPER_MIN_MOVE_PCT}%"
+                )
+                continue
+
             direction = "long" if row["expected_dir"] == "up" else "short"
             if SPOT_LONG_ONLY and direction == "short":
+                logger.debug(f"[paper] skip {sym}: SHORT заблоковано (SPOT_LONG_ONLY)")
                 continue
 
             entry_price = float(row["price_t1"])
@@ -259,7 +282,7 @@ async def _open_new_trades(db) -> int:
             """, (
                 c["event_id"], sym, direction, entry_ts,
                 entry_price_eff, entry_fee, TRADE_SIZE_USD,
-                f"hit_rate={hit_rate:.0f}% n={total}"
+                f"hit_rate={hit_rate:.0f}% n={total} |ret15|={abs(ret_15):.2f}%"
             ))
 
             await db.execute("""
@@ -277,13 +300,14 @@ async def _open_new_trades(db) -> int:
                 f"Подія: {c['title']}\n"
                 f"Очікуваний напрямок: {row['expected_dir']}\n"
                 f"Hit rate: {hit_rate:.0f}% (n={total})\n"
+                f"Ret +15хв: {ret_15:+.3f}%\n"
                 f"Вхід: ${entry_price_eff:.4f}\n"
                 f"Розмір: ${TRADE_SIZE_USD:.2f}"
             )
             await _notify(text)
             logger.info(
                 f"[paper] opened {direction} {sym} on event {c['event_id']} "
-                f"@ {entry_price_eff:.4f} (hit_rate={hit_rate:.0f}%)"
+                f"@ {entry_price_eff:.4f} (hit_rate={hit_rate:.0f}%, ret15={ret_15:+.3f}%)"
             )
 
     return opened

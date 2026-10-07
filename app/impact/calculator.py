@@ -13,7 +13,7 @@ from app.impact.expected import get_expected_direction, classify_hit
 logger = logging.getLogger(__name__)
 
 WINDOWS = [1, 5, 15, 30, 60]
-MIN_THRESHOLD_PCT = 0.30
+MIN_THRESHOLD_PCT = 0.10
 THRESHOLD_MULT = 2.0
 VOLATILITY_LOOKBACK_MIN = 24 * 60
 
