@@ -2,8 +2,8 @@
 FastAPI-додаток: API для подій, цін, impact, LIVE, Paper Trading.
 
 Scheduler:
-  - refresh_calendar (day=today) — кожні 15 хв (швидке підхоплення actual_value)
-  - refresh_calendar (day=today) — кожні 6 год (повне оновлення)
+  - refresh_calendar (day=today) — кожні 15 хв
+  - refresh_calendar (day=today) — кожні 6 год
   - refresh_calendar (day=today) — о 00:01 UTC щодня
   - load_history_sync — кожні 24 години
   - recompute_impact_job — кожні 30 хвилин
@@ -11,14 +11,16 @@ Scheduler:
 """
 
 import asyncio
+import csv
+import io
 import logging
 import time as _time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -85,13 +87,6 @@ def _iso_to_ms(iso_str: str | None) -> int | None:
 # Background jobs
 # ---------------------------------------------------------------------------
 async def refresh_calendar(day: str = "today"):
-    """
-    Парсить ForexFactory і додає/оновлює події в БД.
-
-    INSERT OR IGNORE — додає нові.
-    UPDATE — оновлює forecast/previous/actual для вже існуючих
-             (важливо для підхоплення actual_value після публікації).
-    """
     logger.info(f"Refreshing economic calendar (day={day})...")
     try:
         events = fetch_events(day=day)
@@ -104,7 +99,6 @@ async def refresh_calendar(day: str = "today"):
 
         async with get_db() as db:
             for e in events:
-                # 1) Спроба INSERT (нові події)
                 cur = await db.execute("""
                     INSERT OR IGNORE INTO events
                     (provider, title, country, importance, time_utc,
@@ -117,7 +111,6 @@ async def refresh_calendar(day: str = "today"):
                 if cur.rowcount > 0:
                     inserted += 1
                 else:
-                    # 2) UPDATE — оновлюємо actual/forecast, якщо вони з'явились
                     upd = await db.execute("""
                         UPDATE events
                         SET forecast_value = COALESCE(?, forecast_value),
@@ -208,44 +201,24 @@ async def lifespan(app: FastAPI):
     except Exception as ex:
         logger.exception(f"Initial history load failed: {ex}")
 
-    # --- Scheduler jobs ---
-    # 1) Календар кожні 15 хв — швидке підхоплення actual_value
-    scheduler.add_job(
-        refresh_calendar, "interval",
-        minutes=15, id="calendar_frequent",
-        kwargs={"day": "today"},
-    )
-    # 2) Календар кожні 6 год — повне оновлення
-    scheduler.add_job(
-        refresh_calendar, "interval",
-        hours=settings.calendar_refresh_hours, id="calendar_interval",
-        kwargs={"day": "today"},
-    )
-    # 3) Календар о 00:01 UTC — новий день
-    scheduler.add_job(
-        refresh_calendar, CronTrigger(hour=0, minute=1),
-        id="calendar_daily", kwargs={"day": "today"},
-    )
-    # 4) Свічки — кожні 24 год
-    scheduler.add_job(
-        load_history_sync, "interval",
-        hours=24, id="history_daily",
-        kwargs={"days": 2, "interval": "1"},
-    )
-    # 5) Impact — кожні 30 хв
-    scheduler.add_job(
-        recompute_impact_job, "interval",
-        minutes=30, id="impact_recompute_auto",
-    )
-    # 6) Paper engine — кожні 5 хв
-    scheduler.add_job(
-        paper_engine_job, "interval",
-        minutes=5, id="paper_engine",
-    )
+    scheduler.add_job(refresh_calendar, "interval",
+                      minutes=15, id="calendar_frequent",
+                      kwargs={"day": "today"})
+    scheduler.add_job(refresh_calendar, "interval",
+                      hours=settings.calendar_refresh_hours, id="calendar_interval",
+                      kwargs={"day": "today"})
+    scheduler.add_job(refresh_calendar, CronTrigger(hour=0, minute=1),
+                      id="calendar_daily", kwargs={"day": "today"})
+    scheduler.add_job(load_history_sync, "interval",
+                      hours=24, id="history_daily",
+                      kwargs={"days": 2, "interval": "1"})
+    scheduler.add_job(recompute_impact_job, "interval",
+                      minutes=30, id="impact_recompute_auto")
+    scheduler.add_job(paper_engine_job, "interval",
+                      minutes=5, id="paper_engine")
     scheduler.start()
     logger.info(f"Scheduler started. Jobs: {[j.id for j in scheduler.get_jobs()]}")
 
-    # WebSocket Bybit — у власному потоці
     start_ws_thread()
 
     asyncio.create_task(recompute_impact_job())
@@ -310,18 +283,78 @@ async def api_stats():
 
 
 @app.get("/events")
-async def api_events(limit: int = 50):
+async def api_events(
+    limit: int = 50,
+    days_back: int | None = None,
+    days_forward: int | None = None,
+    search: str | None = None,
+    importance: str | None = None,
+):
+    """
+    Повертає список подій.
+
+    Фільтри:
+      - days_back: скільки днів назад (None = без обмежень)
+      - days_forward: скільки днів вперед (None = без обмежень)
+      - search: рядок пошуку по title (case-insensitive)
+      - importance: 'high' | 'medium' | 'low'
+    """
+    where = ["1=1"]
+    params: list = []
+
+    if days_back is not None:
+        from_iso = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+        where.append("e.time_utc >= ?")
+        params.append(from_iso)
+
+    if days_forward is not None:
+        to_iso = (datetime.now(timezone.utc) + timedelta(days=days_forward)).isoformat()
+        where.append("e.time_utc <= ?")
+        params.append(to_iso)
+
+    if search:
+        where.append("LOWER(e.title) LIKE ?")
+        params.append(f"%{search.lower()}%")
+
+    if importance:
+        where.append("e.importance = ?")
+        params.append(importance)
+
+    where_sql = " AND ".join(where)
+
     async with get_db() as db:
-        cur = await db.execute("""
+        cur = await db.execute(f"""
             SELECT e.id, e.title, e.country, e.importance, e.time_utc,
                    e.forecast_value, e.previous_value, e.actual_value,
                    ei.ret_15m, ei.ret_60m, ei.dir_15m, ei.dir_60m,
                    ei.expected_dir, ei.hit
             FROM events e
             LEFT JOIN event_impact ei ON ei.event_id = e.id AND ei.symbol = 'SOLUSDT'
+            WHERE {where_sql}
             ORDER BY e.time_utc DESC
             LIMIT ?
-        """, (limit,))
+        """, params + [limit])
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.get("/events/calendar")
+async def api_events_calendar(days: int = 7):
+    """
+    Календар подій: повертає події за наступні `days` днів.
+    Використовується для тижневого календаря у вебі.
+    """
+    from_iso = datetime.now(timezone.utc).isoformat()
+    to_iso = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT id, title, country, importance, time_utc,
+                   forecast_value, actual_value
+            FROM events
+            WHERE time_utc BETWEEN ? AND ?
+            ORDER BY time_utc ASC
+        """, (from_iso, to_iso))
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
@@ -375,6 +408,112 @@ async def api_prices_range(hours: int = 24, symbol: str | None = None):
         events = [dict(r) for r in await cur.fetchall()]
 
     return {"symbol": sym, "hours": hours, "candles": candles, "events": events}
+
+
+# ============================================================================
+# API: CSV export
+# ============================================================================
+@app.get("/events/export.csv")
+async def api_events_export_csv(
+    days_back: int | None = 30,
+    importance: str | None = None,
+    search: str | None = None,
+):
+    """Експорт подій + impact у CSV."""
+    where = ["1=1"]
+    params: list = []
+
+    if days_back is not None:
+        from_iso = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+        where.append("e.time_utc >= ?")
+        params.append(from_iso)
+    if importance:
+        where.append("e.importance = ?")
+        params.append(importance)
+    if search:
+        where.append("LOWER(e.title) LIKE ?")
+        params.append(f"%{search.lower()}%")
+
+    where_sql = " AND ".join(where)
+
+    async with get_db() as db:
+        cur = await db.execute(f"""
+            SELECT
+                e.id, e.time_utc, e.title, e.country, e.importance,
+                e.forecast_value, e.previous_value, e.actual_value,
+                ei.hit, ei.expected_dir,
+                ei.ret_1m, ei.ret_5m, ei.ret_15m, ei.ret_30m, ei.ret_60m,
+                ei.dir_1m, ei.dir_5m, ei.dir_15m, ei.dir_30m, ei.dir_60m,
+                ei.price_baseline, ei.threshold_pct
+            FROM events e
+            LEFT JOIN event_impact ei ON ei.event_id = e.id AND ei.symbol = 'SOLUSDT'
+            WHERE {where_sql}
+            ORDER BY e.time_utc DESC
+        """, params)
+        rows = await cur.fetchall()
+
+    # Формуємо CSV у пам'яті
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "id", "time_utc", "title", "country", "importance",
+        "forecast", "previous", "actual",
+        "hit", "expected_dir",
+        "ret_1m", "ret_5m", "ret_15m", "ret_30m", "ret_60m",
+        "dir_1m", "dir_5m", "dir_15m", "dir_30m", "dir_60m",
+        "price_baseline", "threshold_pct",
+    ])
+    for r in rows:
+        writer.writerow([r[k] for k in r.keys()])
+
+    buf.seek(0)
+    filename = f"events_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/paper/trades/export.csv")
+async def api_paper_trades_export_csv():
+    """Експорт paper-угод у CSV."""
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT
+                pt.id, pt.event_id, pt.symbol, pt.direction,
+                pt.entry_ts, pt.entry_price, pt.entry_fee,
+                pt.exit_ts, pt.exit_price, pt.exit_fee,
+                pt.size_usd, pt.pnl, pt.pnl_pct, pt.status, pt.reason,
+                pt.opened_at, pt.closed_at,
+                e.title AS event_title, e.time_utc AS event_time,
+                e.importance, e.forecast_value, e.actual_value
+            FROM paper_trades pt
+            JOIN events e ON e.id = pt.event_id
+            ORDER BY pt.id DESC
+        """)
+        rows = await cur.fetchall()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "id", "event_id", "event_time", "event_title", "importance",
+        "symbol", "direction",
+        "entry_ts", "entry_price", "entry_fee",
+        "exit_ts", "exit_price", "exit_fee",
+        "size_usd", "pnl", "pnl_pct", "status", "reason",
+        "opened_at", "closed_at",
+    ])
+    for r in rows:
+        writer.writerow([r[k] for k in r.keys()])
+
+    buf.seek(0)
+    filename = f"paper_trades_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ============================================================================
@@ -500,7 +639,6 @@ async def api_paper_trades(limit: int = 100, status: str | None = None):
 
 @app.get("/paper/trades/range")
 async def api_paper_trades_range(hours: int = 24):
-    """Повертає угоди, що перетинаються з діапазоном [now-hours, now]."""
     now_ms = int(_time.time() * 1000)
     from_ms = now_ms - hours * 60 * 60 * 1000
 
@@ -535,7 +673,6 @@ async def api_paper_reset():
 
 @app.post("/paper/run")
 async def api_paper_run():
-    """Ручний запуск paper engine (для тесту)."""
     return await process_paper_engine()
 
 

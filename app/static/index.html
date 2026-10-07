@@ -124,6 +124,11 @@
 <nav class="bg-slate-800 border-b border-slate-700 px-6 py-3">
   <div class="max-w-7xl mx-auto flex items-center gap-6">
     <a href="#" class="text-xl font-bold text-cyan-400">📊 News Bot</a>
+    <button onclick="refreshAll()" id="refresh-all-btn"
+            class="ml-4 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm tip"
+            data-tip="Оновити всі дані (події, impact, paper).">
+      ⟳ Оновити все
+    </button>
     <span class="ml-auto text-sm text-slate-500">
       SOL/BTC/ETH · <span id="ws-status" class="text-red-400">● offline</span>
       · <span class="tip" data-tip="Час у веб-панелі — за Києвом (Europe/Kyiv). У дужках — UTC.">🕒 Київ</span>
@@ -139,6 +144,7 @@
     <div class="tab" data-tab="events">Події</div>
     <div class="tab" data-tab="impact">Вплив</div>
     <div class="tab" data-tab="paper">💰 Paper</div>
+    <div class="tab" data-tab="calendar">📅 Календар</div>
     <div class="tab" data-tab="heatmap">Heatmap</div>
     <div class="tab" data-tab="help">Довідка</div>
   </div>
@@ -261,15 +267,33 @@
 
   <!-- ==================== EVENTS ==================== -->
   <div id="tab-events" style="display:none">
-    <div class="flex justify-between mb-4">
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold">Події</h1>
-      <div class="flex gap-2">
-        <button class="tab active" onclick="loadEvents(null)">Всі</button>
-        <button class="tab" onclick="loadEvents('high')">High</button>
-        <button class="tab" onclick="loadEvents('medium')">Medium</button>
+      <div class="flex gap-2 flex-wrap items-center">
+        <input type="text" id="events-search" placeholder="🔍 Пошук по назві..."
+               class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200 w-64"
+               oninput="debouncedLoadEvents()">
+        <select id="events-days" class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200" onchange="loadEvents()">
+          <option value="1">Останні 24 год</option>
+          <option value="7" selected>Останні 7 днів</option>
+          <option value="30">Останні 30 днів</option>
+          <option value="90">Останні 90 днів</option>
+          <option value="">Всі</option>
+        </select>
+        <select id="events-importance" class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200" onchange="loadEvents()">
+          <option value="">Всі</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <button onclick="exportEventsCsv()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm tip"
+                data-tip="Завантажити CSV з подіями і impact.">
+          ⬇ CSV
+        </button>
       </div>
     </div>
     <div class="card p-4">
+      <div id="events-count" class="text-sm text-slate-400 mb-2">—</div>
       <table>
         <thead><tr>
           <th>ID</th>
@@ -304,7 +328,7 @@
         Показано статистику для: <span class="text-cyan-400 font-semibold" id="impact-symbol-label">SOLUSDT</span>
       </div>
       <div class="hint">
-        Перемикач фільтрує всі цифри нижче за символом. «Всі (разом)» — середнє по SOL+BTC+ETH (може вводити в оману, бо BTC рухається сильніше).
+        Перемикач фільтрує всі цифри нижче за символом. «Всі (разом)» — середнє по SOL+BTC+ETH.
       </div>
     </div>
 
@@ -348,6 +372,10 @@
         <button onclick="resetPaper()" class="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm tip"
                 data-tip="Скинути баланс до $100 і видалити всі угоди.">
           ↺ Скинути акаунт
+        </button>
+        <button onclick="exportPaperCsv()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm tip"
+                data-tip="Завантажити CSV з усіма угодами.">
+          ⬇ CSV
         </button>
       </div>
     </div>
@@ -398,7 +426,6 @@
       </div>
     </div>
 
-    <!-- По символах -->
     <div class="card p-4 mb-6" id="paper-by-symbol-card" style="display:none">
       <h2 class="section-title">
         <span class="tip" data-tip="Порівняння P&L і win rate по кожному символу окремо.">📊 По символах</span>
@@ -464,6 +491,27 @@
     </div>
   </div>
 
+  <!-- ==================== CALENDAR ==================== -->
+  <div id="tab-calendar" style="display:none">
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+      <h1 class="text-2xl font-bold">📅 Календар подій</h1>
+      <div class="flex gap-2 items-center">
+        <select id="calendar-days" class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200" onchange="loadCalendar()">
+          <option value="3">3 дні</option>
+          <option value="7" selected>7 днів</option>
+          <option value="14">14 днів</option>
+          <option value="30">30 днів</option>
+        </select>
+        <span class="text-xs text-slate-500">Клік на подію → деталі</span>
+      </div>
+    </div>
+    <div class="card p-4">
+      <div id="calendar-container" class="overflow-auto">
+        <span class="loading"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== HEATMAP ==================== -->
   <div id="tab-heatmap" style="display:none">
     <h1 class="text-2xl font-bold mb-6">Heatmap — активність новин</h1>
@@ -514,10 +562,27 @@
         <li><b>Кнопки + / − / Reset</b> — у правому верхньому куті графіка</li>
         <li><b>▲ зелений</b> — LONG entry</li>
         <li><b>▼ червоний</b> — SHORT entry</li>
-        <li><b>◆ ромб</b> — exit (колір = P&L: зелений якщо +, червоний якщо −)</li>
+        <li><b>◆ ромб</b> — exit (колір = P&L)</li>
         <li>Наведи на маркер — побачиш деталі угоди</li>
-        <li>Якщо в одній точці декілька подій — тултіп покаже усі</li>
       </ul>
+    </div>
+
+    <div class="card p-6 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">🔍 Фільтри і пошук (вкладка «Події»)</h2>
+      <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside ml-4">
+        <li><b>Пошук</b> — шукає по назві події (case-insensitive), оновлюється через 300мс після введення</li>
+        <li><b>Фільтр дат</b> — 24 год / 7 днів / 30 днів / 90 днів / всі</li>
+        <li><b>Фільтр важливості</b> — high / medium / low</li>
+        <li><b>⬇ CSV</b> — завантажує CSV з поточними фільтрами</li>
+      </ul>
+    </div>
+
+    <div class="card p-6 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">📅 Календар подій</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Групує майбутні події по днях. Показує час (за Києвом), важливість, валюту, назву.
+        Клік на подію → відкриває деталі. Можна вибрати 3 / 7 / 14 / 30 днів наперед.
+      </p>
     </div>
 
     <div class="card p-6 mb-4">
@@ -528,8 +593,8 @@
       <ol class="text-sm text-slate-300 space-y-1 list-decimal list-inside ml-4">
         <li>Подія має <b>importance = high</b></li>
         <li>Impact розрахований, і <b>hit = HIT або MISS</b></li>
-        <li>Hit rate по цьому title <b>≥ 60%</b> (з n ≥ 5)</li>
-        <li>Відкрито менше ніж <b>6</b> угод одночасно (3 на символ × 2 символи)</li>
+        <li>Hit rate по цьому title <b>≥ 60%</b> (з n ≥ 1 у тестовому режимі)</li>
+        <li>Відкрито менше ніж <b>6</b> угод одночасно</li>
       </ol>
       <p class="text-slate-300 text-sm leading-relaxed mt-3">
         <b>Режим:</b> SPOT + LONG-only. Події з `expected_dir = down` <b>пропускаються</b>.<br>
@@ -539,16 +604,13 @@
         <b>Вихід:</b> close свічки T+60.<br>
         <b>Символи:</b> <span class="badge-sol px-2 py-0.5 rounded text-xs">SOLUSDT</span> + <span class="badge-btc px-2 py-0.5 rounded text-xs">BTCUSDT</span>.
       </p>
-      <p class="text-slate-300 text-sm leading-relaxed mt-3">
-        <b>📊 По символах</b> — порівнює P&L, win rate і avg win/loss для кожного символу окремо. Допомагає визначити, чи BTC дає кращий edge, ніж SOL.
-      </p>
     </div>
 
     <div class="card p-6 mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Перемикач символів на вкладці «Вплив»</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
         Кнопки <b>SOL / BTC / ETH / Всі</b> фільтрують статистику за символом.<br><br>
-        <b>SOL</b> — показує тільки реакцію SOLUSDT. Це <b>правильна картина</b> для торгівлі на SOL.<br>
+        <b>SOL</b> — показує тільки реакцію SOLUSDT.<br>
         <b>BTC / ETH</b> — для порівняння.<br>
         <b>Всі (разом)</b> — середнє по всіх трьох.
       </p>
@@ -662,12 +724,13 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    ['live','dashboard','events','impact','paper','heatmap','help'].forEach(name => {
+    ['live','dashboard','events','impact','paper','calendar','heatmap','help'].forEach(name => {
       document.getElementById('tab-' + name).style.display = name === t.dataset.tab ? '' : 'none';
     });
     if (t.dataset.tab === 'events') loadEvents();
     if (t.dataset.tab === 'impact') loadImpact();
     if (t.dataset.tab === 'paper') loadPaper();
+    if (t.dataset.tab === 'calendar') loadCalendar();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
   };
@@ -724,15 +787,13 @@ let impactSymbol = 'SOLUSDT';
 let tradesByLabel = {};
 let eventsByLabelAll = {};
 let labelsGlobal = [];
+let eventsSearchTimer = null;
 
 // ==================== CHART ZOOM CONTROLS ====================
 function zoomChart(factor) {
   if (!priceChart) return;
   if (ZOOM_ENABLED && typeof priceChart.zoomScale === 'function') {
-    try {
-      priceChart.zoomScale('x', factor);
-      return;
-    } catch (e) {}
+    try { priceChart.zoomScale('x', factor); return; } catch (e) {}
   }
   const xScale = priceChart.scales.x;
   const min = xScale.min ?? 0;
@@ -754,6 +815,30 @@ function resetZoom() {
   priceChart.options.scales.x.min = undefined;
   priceChart.options.scales.x.max = undefined;
   priceChart.update('none');
+}
+
+// ==================== REFRESH ALL ====================
+async function refreshAll() {
+  const btn = document.getElementById('refresh-all-btn');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '⟳ Оновлення...';
+  btn.disabled = true;
+
+  try {
+    await Promise.allSettled([
+      loadDashboard(),
+      loadPaper(),
+      loadImpact(),
+    ]);
+  } catch (e) {
+    console.error('refreshAll error:', e);
+  }
+
+  btn.innerHTML = '✓ Оновлено';
+  setTimeout(() => {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }, 1500);
 }
 
 // ==================== LIVE ====================
@@ -941,11 +1026,7 @@ async function loadPriceChart(hours = null) {
     if (t.exit_ts) {
       const exitIdx = findIdxByTs(tsArray, t.exit_ts);
       if (exitIdx >= 0) {
-        exits.push({
-          x: labels[exitIdx],
-          y: prices[exitIdx],
-          pnl: t.pnl
-        });
+        exits.push({ x: labels[exitIdx], y: prices[exitIdx], pnl: t.pnl });
         if (!tradesByLabel[labels[exitIdx]]) {
           tradesByLabel[labels[exitIdx]] = { ...t, kind: 'exit' };
         }
@@ -1175,11 +1256,27 @@ async function loadDashboard() {
 }
 
 // ==================== EVENTS ====================
-async function loadEvents(importance = null) {
-  const events = await api('/events?limit=500');
-  const filtered = importance ? events.filter(e => e.importance === importance) : events;
+function debouncedLoadEvents() {
+  if (eventsSearchTimer) clearTimeout(eventsSearchTimer);
+  eventsSearchTimer = setTimeout(() => loadEvents(), 300);
+}
+
+async function loadEvents() {
+  const search = document.getElementById('events-search').value.trim();
+  const daysBack = document.getElementById('events-days').value;
+  const importance = document.getElementById('events-importance').value;
+
+  const params = new URLSearchParams();
+  params.set('limit', '500');
+  if (daysBack) params.set('days_back', daysBack);
+  if (search) params.set('search', search);
+  if (importance) params.set('importance', importance);
+
+  const events = await api(`/events?${params.toString()}`);
+  document.getElementById('events-count').textContent = `Знайдено: ${events.length}`;
+
   const tbody = document.getElementById('events-tbody');
-  tbody.innerHTML = filtered.map(e => `
+  tbody.innerHTML = events.map(e => `
     <tr class="cursor-pointer" onclick="openEvent(${e.id})">
       <td class="font-mono text-xs text-slate-500">${e.id}</td>
       <td class="font-mono text-xs">${fmtBothFull(e.time_utc)}</td>
@@ -1191,7 +1288,20 @@ async function loadEvents(importance = null) {
       <td class="text-center ${clsForDir(e.expected_dir)}">${e.expected_dir || '—'}</td>
       <td class="text-center">${hitBadge(e.hit)}</td>
     </tr>
-  `).join('') || '<tr><td colspan="9" class="text-slate-500">Немає подій</td></tr>';
+  `).join('') || '<tr><td colspan="9" class="text-slate-500">Немає подій за фільтром</td></tr>';
+}
+
+function exportEventsCsv() {
+  const search = document.getElementById('events-search').value.trim();
+  const daysBack = document.getElementById('events-days').value;
+  const importance = document.getElementById('events-importance').value;
+
+  const params = new URLSearchParams();
+  if (daysBack) params.set('days_back', daysBack);
+  if (search) params.set('search', search);
+  if (importance) params.set('importance', importance);
+
+  window.location.href = `/events/export.csv?${params.toString()}`;
 }
 
 // ==================== IMPACT ====================
@@ -1233,6 +1343,21 @@ async function loadImpact() {
     const denom = (r.hits||0) + (r.misses||0);
     const rate = denom > 0 ? ((r.hits / denom) * 100).toFixed(0) + '%' : '—';
     const rateCls = denom > 0 ? ((r.hits/denom) >= 0.6 ? 'up' : (r.hits/denom) <= 0.4 ? 'down' : 'flat') : 'flat';
+
+    const rateTip = [
+      `HIT: ${r.hits||0}`,
+      `MISS: ${r.misses||0}`,
+      `NEUTRAL: ${r.neutrals||0}`,
+      `NO_DATA: ${r.no_data||0}`,
+      `N/A: ${r.na||0}`,
+    ].join(' · ');
+
+    const dirTip = [
+      `Up: ${r.up_15m||0}`,
+      `Down: ${r.down_15m||0}`,
+      `Flat: ${r.flat_15m||0}`,
+    ].join(' · ');
+
     return `
       <tr>
         <td>${r.title}</td>
@@ -1242,10 +1367,10 @@ async function loadImpact() {
         <td class="text-right font-mono ${clsFor(r.avg_15m)}">${fmtPct(r.avg_15m)}</td>
         <td class="text-right font-mono ${clsFor(r.avg_30m)}">${fmtPct(r.avg_30m)}</td>
         <td class="text-right font-mono ${clsFor(r.avg_60m)}">${fmtPct(r.avg_60m)}</td>
-        <td class="text-right font-mono text-xs">
+        <td class="text-right font-mono text-xs" title="${dirTip}">
           <span class="up">${r.up_15m||0}</span>/<span class="down">${r.down_15m||0}</span>/<span class="flat">${r.flat_15m||0}</span>
         </td>
-        <td class="text-right font-mono ${rateCls}">${rate}</td>
+        <td class="text-right font-mono ${rateCls}" title="${rateTip}">${rate}</td>
       </tr>
     `;
   }).join('') || '<tr><td colspan="9" class="text-slate-500">Немає даних</td></tr>';
@@ -1311,7 +1436,6 @@ async function loadPaper() {
     document.getElementById('paper-avg-loss').textContent =
       acc.avg_loss == null ? '—' : fmtUsd(acc.avg_loss);
 
-    // --- По символах ---
     const bySymbolCard = document.getElementById('paper-by-symbol-card');
     const bySymbolTbody = document.getElementById('paper-by-symbol-tbody');
     if (acc.by_symbol && acc.by_symbol.length > 0) {
@@ -1466,6 +1590,80 @@ async function resetPaper() {
   await api('/paper/reset', { method: 'POST' });
   alert('Акаунт скинуто');
   loadPaper();
+}
+
+function exportPaperCsv() {
+  window.location.href = '/paper/trades/export.csv';
+}
+
+// ==================== CALENDAR ====================
+async function loadCalendar() {
+  const days = document.getElementById('calendar-days').value;
+  const events = await api(`/events/calendar?days=${days}`);
+
+  const container = document.getElementById('calendar-container');
+  if (events.length === 0) {
+    container.innerHTML = '<p class="text-slate-500">Немає подій на цей період.</p>';
+    return;
+  }
+
+  const byDay = {};
+  for (const ev of events) {
+    const d = new Date(ev.time_utc);
+    const dayKey = d.toLocaleDateString('uk-UA', {
+      timeZone: LOCAL_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+    if (!byDay[dayKey]) byDay[dayKey] = [];
+    byDay[dayKey].push(ev);
+  }
+
+  const days_sorted = Object.keys(byDay).sort();
+  const todayKey = new Date().toLocaleDateString('uk-UA', {
+    timeZone: LOCAL_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+
+  let html = '';
+  for (const day of days_sorted) {
+    const dayEvents = byDay[day];
+    const d = new Date(dayEvents[0].time_utc);
+    const dayLabel = d.toLocaleDateString('uk-UA', {
+      timeZone: LOCAL_TZ, weekday: 'long', day: 'numeric', month: 'long'
+    });
+    const isToday = day === todayKey;
+
+    html += `<div class="mb-6">
+      <div class="flex items-center gap-3 mb-3">
+        <h2 class="text-lg font-semibold ${isToday ? 'text-cyan-400' : 'text-slate-200'}">
+          ${dayLabel}${isToday ? ' · сьогодні' : ''}
+        </h2>
+        <span class="text-xs text-slate-500">${dayEvents.length} подій</span>
+      </div>
+      <div class="space-y-1">
+        ${dayEvents.map(ev => {
+          const localTime = new Date(ev.time_utc).toLocaleTimeString('uk-UA', {
+            timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false
+          });
+          const impColor = {
+            high: 'border-l-red-500',
+            medium: 'border-l-amber-500',
+            low: 'border-l-slate-500',
+          }[ev.importance] || 'border-l-slate-500';
+          return `
+            <div class="flex items-center gap-4 px-3 py-2 bg-slate-800/40 rounded border-l-4 ${impColor} hover:bg-slate-800 cursor-pointer"
+                 onclick="openEvent(${ev.id})">
+              <span class="font-mono text-sm text-cyan-400 w-16">${localTime}</span>
+              ${badge(ev.importance)}
+              <span class="font-mono text-xs text-slate-500 w-10">${ev.country}</span>
+              <span class="flex-1 text-slate-200">${ev.title}</span>
+              ${ev.forecast_value ? `<span class="text-xs text-slate-500">fc: ${ev.forecast_value}</span>` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  container.innerHTML = html;
 }
 
 // ==================== HEATMAP ====================
@@ -1681,6 +1879,8 @@ setInterval(() => {
   if (active.dataset.tab === 'dashboard') loadDashboard();
   if (active.dataset.tab === 'live') loadLive();
   if (active.dataset.tab === 'paper') loadPaper();
+  if (active.dataset.tab === 'events') loadEvents();
+  if (active.dataset.tab === 'calendar') loadCalendar();
 }, 30000);
 
 setInterval(() => {
