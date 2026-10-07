@@ -146,6 +146,7 @@
     <div class="tab" data-tab="paper">💰 Paper</div>
     <div class="tab" data-tab="calendar">📅 Календар</div>
     <div class="tab" data-tab="heatmap">Heatmap</div>
+    <div class="tab" data-tab="tools">🔧 Інструменти</div>
     <div class="tab" data-tab="help">Довідка</div>
   </div>
 
@@ -548,6 +549,153 @@
       </table>
     </div>
   </div>
+
+
+  <!-- ==================== TOOLS ==================== -->
+<div id="tab-tools" style="display:none">
+  <h1 class="text-2xl font-bold mb-6">🔧 Інструменти</h1>
+
+  <!-- Управління -->
+  <div class="card p-4 mb-6">
+    <h2 class="section-title">⚙ Управління</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+      <!-- Перерахувати impact -->
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">⟳ Перерахувати impact</div>
+        <div class="hint mb-2">Перерахувати вплив для всіх минулих подій. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /impact/recompute</code></div>
+        <div class="flex gap-2 items-center">
+          <label class="text-xs text-slate-400">Limit:</label>
+          <input type="number" id="tool-impact-limit" value="1000" min="1" max="10000"
+                 class="w-24 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+          <button onclick="toolRecomputeImpact()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
+        </div>
+      </div>
+
+      <!-- Запустити paper engine -->
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">▶ Запустити paper engine</div>
+        <div class="hint mb-2">Перевірити нові події та відкрити віртуальні угоди. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /paper/run</code></div>
+        <button onclick="toolRunPaper()" class="mt-2 px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
+      </div>
+
+      <!-- Довантажити свічки -->
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">📥 Довантажити свічки</div>
+        <div class="hint mb-2">Завантажити історичні свічки через REST Bybit. Еквівалент: <code class="bg-slate-700 px-1 rounded">python scripts/load_history.py N</code></div>
+        <div class="flex gap-2 items-center">
+          <label class="text-xs text-slate-400">Днів:</label>
+          <input type="number" id="tool-history-days" value="2" min="1" max="90"
+                 class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+          <button onclick="toolLoadHistory()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+        </div>
+      </div>
+
+      <!-- Оновити календар today -->
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">📅 Оновити календар (today)</div>
+        <div class="hint mb-2">Парсити ForexFactory за сьогодні. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /events/load_history</code></div>
+        <button onclick="toolRefreshCalendar()" class="mt-2 px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Парсити today</button>
+      </div>
+
+      <!-- Завантажити тиждень -->
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">📅 Завантажити тиждень</div>
+        <div class="hint mb-2">Завантажити this/last/next тиждень з ForexFactory.</div>
+        <div class="flex gap-2 items-center">
+          <select id="tool-calendar-week" class="px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <option value="this">this</option>
+            <option value="last">last</option>
+            <option value="next">next</option>
+          </select>
+          <button onclick="toolLoadCalendarWeek()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+        </div>
+      </div>
+
+      <!-- Найближчі high події -->
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">🔥 Найближчі high події</div>
+        <div class="hint mb-2">Показати всі high-importance події у наступні 7 днів.</div>
+        <button onclick="toolShowUpcoming()" class="mt-2 px-3 py-1 bg-amber-700 hover:bg-amber-600 rounded text-sm">Показати</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Результат останньої дії -->
+  <div class="card p-4 mb-6" id="tools-result-card" style="display:none">
+    <h2 class="section-title">
+      📋 Результат останньої дії
+      <button onclick="hideToolsResult()" class="text-xs text-slate-500 hover:text-slate-300 ml-auto">✕</button>
+    </h2>
+    <pre id="tools-result" class="text-xs font-mono text-slate-300 bg-slate-900 p-3 rounded overflow-auto max-h-96"></pre>
+  </div>
+
+  <!-- Найближчі high події (результат) -->
+  <div class="card p-4 mb-6" id="tools-upcoming-card" style="display:none">
+    <h2 class="section-title">🔥 Найближчі high події</h2>
+    <table>
+      <thead><tr>
+        <th>Час (Київ / UTC)</th>
+        <th>Вал.</th>
+        <th>Подія</th>
+        <th class="text-right">Forecast</th>
+        <th class="text-right">Previous</th>
+      </tr></thead>
+      <tbody id="tools-upcoming-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Діагностика -->
+  <div class="card p-4 mb-6">
+    <h2 class="section-title">🩺 Діагностика</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">📊 Статистика БД</div>
+        <div class="hint mb-2">Кількість подій, свічок, impact, угод + баланс.</div>
+        <button onclick="toolDbStats()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+      </div>
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">📋 Логи сервісу</div>
+        <div class="hint mb-2">Останні N рядків journalctl для newsbot.service.</div>
+        <div class="flex gap-2 items-center mt-2">
+          <input type="number" id="tool-logs-lines" value="100" min="10" max="500"
+                 class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+          <button onclick="toolLogs()" class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        </div>
+      </div>
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">🔍 Діагностика impact</div>
+        <div class="hint mb-2">Розбивка impact по hit і importance.</div>
+        <button onclick="toolDiagnostics()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+      </div>
+      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+        <div class="font-semibold mb-1">📤 Експорт CSV</div>
+        <div class="hint mb-2">Завантажити події або угоди у CSV.</div>
+        <div class="flex gap-2 mt-2">
+          <button onclick="window.location.href='/events/export.csv?days_back=30'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Події</button>
+          <button onclick="window.location.href='/paper/trades/export.csv'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Угоди</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Небезпечні дії -->
+  <div class="card p-4 mb-6 border-red-900">
+    <h2 class="section-title text-red-400">⚠ Небезпечні дії</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="bg-red-950/30 p-3 rounded border border-red-900">
+        <div class="font-semibold mb-1 text-red-300">🗑 Очистити impact</div>
+        <div class="hint mb-2">Видалити всі записи з <code class="bg-slate-700 px-1 rounded">event_impact</code>. Після цього потрібно перерахувати. Еквівалент: <code class="bg-slate-700 px-1 rounded">DELETE FROM event_impact</code></div>
+        <button onclick="toolClearImpact()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">🗑 Очистити</button>
+      </div>
+      <div class="bg-red-950/30 p-3 rounded border border-red-900">
+        <div class="font-semibold mb-1 text-red-300">↺ Скинути paper акаунт</div>
+        <div class="hint mb-2">Скинути баланс до $100 і видалити всі угоди. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /paper/reset</code></div>
+        <button onclick="toolResetPaper()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">↺ Скинути</button>
+      </div>
+    </div>
+  </div>
+</div>
 
   <!-- ==================== HELP ==================== -->
   <div id="tab-help" style="display:none">
@@ -1869,6 +2017,161 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   connect();
 })();
+
+
+// ==================== TOOLS ====================
+function showToolsResult(label, data) {
+  const card = document.getElementById('tools-result-card');
+  const pre = document.getElementById('tools-result');
+  card.style.display = '';
+  const timestamp = new Date().toLocaleString('uk-UA', { timeZone: LOCAL_TZ });
+  pre.textContent = `[${timestamp}] ${label}\n\n${JSON.stringify(data, null, 2)}`;
+}
+
+function hideToolsResult() {
+  document.getElementById('tools-result-card').style.display = 'none';
+}
+
+async function toolRecomputeImpact() {
+  const limit = parseInt(document.getElementById('tool-impact-limit').value) || 1000;
+  showToolsResult(`⟳ Перерахувати impact (limit=${limit})`, { loading: true });
+  try {
+    const r = await api(`/tools/recompute_impact?limit=${limit}`, { method: 'POST' });
+    showToolsResult(`⟳ Перерахувати impact (limit=${limit})`, r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolRunPaper() {
+  showToolsResult('▶ Запустити paper engine', { loading: true });
+  try {
+    const r = await api('/tools/run_paper_engine', { method: 'POST' });
+    showToolsResult('▶ Запустити paper engine', r);
+    setTimeout(() => loadPaper(), 500);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolLoadHistory() {
+  const days = parseInt(document.getElementById('tool-history-days').value) || 2;
+  showToolsResult(`📥 Довантажити свічки (days=${days})`, { loading: true });
+  try {
+    const r = await api(`/tools/load_history?days=${days}&interval=1`, { method: 'POST' });
+    showToolsResult(`📥 Довантажити свічки (days=${days})`, r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolRefreshCalendar() {
+  showToolsResult('📅 Оновити календар (today)', { loading: true });
+  try {
+    const r = await api('/tools/refresh_calendar?day=today', { method: 'POST' });
+    showToolsResult('📅 Оновити календар (today)', r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolLoadCalendarWeek() {
+  const week = document.getElementById('tool-calendar-week').value;
+  showToolsResult(`📅 Завантажити тиждень (week=${week})`, { loading: true });
+  try {
+    const r = await api(`/tools/load_calendar_week?week=${week}`, { method: 'POST' });
+    showToolsResult(`📅 Завантажити тиждень (week=${week})`, r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolShowUpcoming() {
+  try {
+    const events = await api('/events/upcoming_high?days=7&limit=20');
+    const card = document.getElementById('tools-upcoming-card');
+    const tbody = document.getElementById('tools-upcoming-tbody');
+    if (events.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-slate-500">Немає high подій у наступні 7 днів</td></tr>';
+    } else {
+      tbody.innerHTML = events.map(e => `
+        <tr class="cursor-pointer" onclick="openEvent(${e.id})">
+          <td class="font-mono text-xs">${fmtBothFull(e.time_utc)}</td>
+          <td class="font-mono">${e.country}</td>
+          <td class="text-amber-400">${e.title}</td>
+          <td class="text-right font-mono text-xs">${e.forecast_value || '—'}</td>
+          <td class="text-right font-mono text-xs">${e.previous_value || '—'}</td>
+        </tr>
+      `).join('');
+    }
+    card.style.display = '';
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolDbStats() {
+  try {
+    const r = await api('/tools/db_stats');
+    showToolsResult('📊 Статистика БД', r);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolLogs() {
+  const lines = parseInt(document.getElementById('tool-logs-lines').value) || 100;
+  try {
+    const r = await api(`/tools/logs?lines=${lines}`);
+    if (r.error) {
+      showToolsResult('📋 Логи (помилка)', r);
+    } else {
+      const card = document.getElementById('tools-result-card');
+      const pre = document.getElementById('tools-result');
+      card.style.display = '';
+      pre.textContent = r.lines.join('\n');
+    }
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolDiagnostics() {
+  try {
+    const r = await api('/tools/diagnostics');
+    showToolsResult('🔍 Діагностика impact', r);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolClearImpact() {
+  if (!confirm('⚠️ Видалити всі записи з event_impact?\n\nЦе НЕ видалить події чи свічки. Після цього треба буде перерахувати impact.')) return;
+  if (!confirm('Точно впевнений? Друге підтвердження.')) return;
+  try {
+    const r = await api('/tools/clear_impact', { method: 'POST' });
+    showToolsResult('🗑 Очистити impact', r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
+async function toolResetPaper() {
+  if (!confirm('⚠️ Скинути paper акаунт?\n\nБаланс повернеться до $100, всі угоди видаляться.')) return;
+  if (!confirm('Точно впевнений? Друге підтвердження.')) return;
+  try {
+    const r = await api('/paper/reset', { method: 'POST' });
+    showToolsResult('↺ Скинути paper акаунт', r);
+    setTimeout(() => loadPaper(), 500);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
 
 // ==================== INIT ====================
 loadDashboard();
