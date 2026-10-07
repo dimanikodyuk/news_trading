@@ -23,12 +23,12 @@ TRADE_SYMBOLS = ["SOLUSDT", "BTCUSDT"]
 TRADE_SIZE_USD = 10.0
 COMMISSION_PCT = 0.1        # 0.1% Bybit spot taker
 SLIPPAGE_PCT = 0.05         # 0.05% slippage
-HIT_RATE_THRESHOLD = 60.0   # %
+HIT_RATE_THRESHOLD = 50.0   # %
 MIN_EVENTS_FOR_TRUST = 1    # ТЕСТ: 1 (для продакшену — 5)
 MAX_OPEN_TRADES = 6         # 3 на символ × 2 символи
 
 # --- Режим торгівлі ---
-SPOT_LONG_ONLY = True
+SPOT_LONG_ONLY = False
 
 
 async def process_paper_engine() -> dict:
