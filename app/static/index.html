@@ -872,7 +872,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    ['live','dashboard','events','impact','paper','calendar','heatmap','help'].forEach(name => {
+    ['live','dashboard','events','impact','paper','calendar','heatmap','tools','help'].forEach(name => {
       document.getElementById('tab-' + name).style.display = name === t.dataset.tab ? '' : 'none';
     });
     if (t.dataset.tab === 'events') loadEvents();
@@ -881,8 +881,10 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
     if (t.dataset.tab === 'calendar') loadCalendar();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
+    // tools — без автозавантаження, все по кнопках
   };
 });
+
 
 // ==================== HELPERS ====================
 const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(3) + '%';
