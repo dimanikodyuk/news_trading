@@ -198,10 +198,10 @@ async def _open_new_trades(db) -> int:
         entry_ts = event_ts + 60_000
         exit_ts = event_ts + 60 * 60_000
         if now_ms < entry_ts:
-            logger.debug(f"[paper] {c['title']}: ще не час (entry_ts у майбутньому)")
+            logger.info(f"[paper] {c['title']}: ще не час (entry_ts у майбутньому)")
             continue
         if now_ms > exit_ts:
-            logger.debug(f"[paper] {c['title']}: вікно минуло")
+            logger.info(f"[paper] {c['title']}: вікно минуло")
             continue
 
         # Hit rate по title (на основі SOL)
@@ -218,11 +218,11 @@ async def _open_new_trades(db) -> int:
         misses = hr["misses"] or 0
         total = hits + misses
         if total < MIN_EVENTS_FOR_TRUST:
-            logger.debug(f"[paper] {c['title']}: n={total} < {MIN_EVENTS_FOR_TRUST}")
+            logger.info(f"[paper] {c['title']}: n={total} < {MIN_EVENTS_FOR_TRUST}")
             continue
         hit_rate = (hits / total * 100) if total > 0 else 0
         if hit_rate < HIT_RATE_THRESHOLD:
-            logger.debug(f"[paper] {c['title']}: hit_rate={hit_rate:.0f}% < {HIT_RATE_THRESHOLD}%")
+            logger.info(f"[paper] {c['title']}: hit_rate={hit_rate:.0f}% < {HIT_RATE_THRESHOLD}%")
             continue
 
         # Для КОЖНОГО символу окремо
