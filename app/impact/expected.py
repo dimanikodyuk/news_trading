@@ -1,5 +1,10 @@
 """
 Визначення очікуваного напрямку руху ціни на основі економічної події.
+
+ВАЖЛИВО: порядок правил критичний!
+`get_expected_direction` бере ПЕРШЕ правило, яке матчить title.
+Тому СПЕЦИФІЧНІ правила (ADP, AHE) мають бути ПЕРЕД загальними (non-farm).
+Інакше ADP буде матчитись правилом `non-farm`, а не своїм.
 """
 
 import logging
@@ -9,26 +14,28 @@ logger = logging.getLogger(__name__)
 
 
 RULES = [
-    # --- USD: інфляція ---
-    {"pattern": ["cpi m/m", "cpi y/y", "core cpi", "ppi m/m", "ppi y/y",
-                 "core pce", "pce price index", "trimmed mean cpi",
-                 "pce price index m/m", "core pce price index m/m"],
-     "higher": "down", "lower": "up"},
+    # =====================================================================
+    # USD: зайнятість — СПЕЦИФІЧНІ правила ПЕРЕД загальними!
+    # =====================================================================
 
-    # --- USD: зайнятість ---
-    {"pattern": ["non-farm", "nonfarm", "average hourly earnings",
-                 "average earnings", "employment change"],
-     "higher": "down", "lower": "up"},
-
-    # ADP Non-Farm: ВИЩЕ прогнозу → сильний ринок → risk-on → UP
+    # --- ADP Non-Farm Employment (risk-on логіка 2026) ---
     {"pattern": ["adp non-farm", "adp employment"],
-     "higher": "up", "lower": "down"},  # ← БУЛО: higher: down
+     "higher": "up", "lower": "down"},
 
-    # JOLTS: ВИЩЕ = сильніший ринок → risk-on → UP
-    {"pattern": ["jolts"],
-     "higher": "up", "lower": "down"},  # ← БУЛО: higher: down
+    # --- Average Hourly Earnings ---
+    {"pattern": ["average hourly earnings", "average earnings"],
+     "higher": "up", "lower": "down"},
 
-    # --- Unemployment Claims: більше заявок = dovish = up для SOL ---
+    # --- NFP (справжній, НЕ ADP) ---
+    {"pattern": ["non-farm employment change", "nonfarm payrolls",
+                 "non-farm payrolls", "nonfarm employment change"],
+     "higher": "down", "lower": "up"},
+
+    # --- Загальне employment change ---
+    {"pattern": ["employment change"],
+     "higher": "up", "lower": "down"},
+
+    # --- Unemployment Claims: більше заявок = dovish = up ---
     {"pattern": ["unemployment claims", "jobless claims", "initial claims"],
      "higher": "up", "lower": "down"},
 
@@ -36,51 +43,84 @@ RULES = [
     {"pattern": ["challenger job cuts"],
      "higher": "up", "lower": "down"},
 
-    # --- GDP ---
-    {"pattern": ["gdp"],
+    # --- JOLTS: більше вакансій = risk-on = up ---
+    {"pattern": ["jolts"],
      "higher": "up", "lower": "down"},
 
-    # --- Retail sales ---
-    {"pattern": ["retail sales"],
-     "higher": "up", "lower": "down"},
-
-    # --- Unemployment rate ---
+    # --- Unemployment rate: вище = dovish = up ---
     {"pattern": ["unemployment rate"],
      "higher": "up", "lower": "down"},
 
-    # --- Interest rate decisions ---
+    # =====================================================================
+    # USD: інфляція
+    # =====================================================================
+    {"pattern": ["cpi m/m", "cpi y/y", "core cpi", "ppi m/m", "ppi y/y",
+                 "core pce", "pce price index", "trimmed mean cpi",
+                 "pce price index m/m", "core pce price index m/m",
+                 "core ppi m/m", "core ppi y/y"],
+     "higher": "down", "lower": "up"},
+
+    # =====================================================================
+    # USD: GDP
+    # =====================================================================
+    {"pattern": ["gdp"],
+     "higher": "up", "lower": "down"},
+
+    # =====================================================================
+    # USD: споживання
+    # =====================================================================
+    {"pattern": ["retail sales", "core retail sales"],
+     "higher": "up", "lower": "down"},
+
+    # =====================================================================
+    # Ставки
+    # =====================================================================
     {"pattern": ["federal funds rate", "interest rate decision",
                  "cash rate", "bank rate", "official cash rate",
                  "monetary policy decision"],
      "higher": "down", "lower": "up"},
 
-    # --- ISM/PMI ---
+    # =====================================================================
+    # ISM / PMI
+    # =====================================================================
     {"pattern": ["ism manufacturing pmi", "ism services pmi",
                  "final manufacturing pmi", "manufacturing pmi",
                  "services pmi"],
      "higher": "up", "lower": "down"},
 
-    # --- Consumer Confidence ---
+    # =====================================================================
+    # Consumer Confidence
+    # =====================================================================
     {"pattern": ["cb consumer confidence", "consumer confidence"],
      "higher": "up", "lower": "down"},
 
-    # --- Trade balance ---
+    # =====================================================================
+    # Trade balance
+    # =====================================================================
     {"pattern": ["trade balance"],
      "higher": "up", "lower": "down"},
 
-    # --- Building permits ---
+    # =====================================================================
+    # Building permits
+    # =====================================================================
     {"pattern": ["building permits", "housing starts"],
      "higher": "up", "lower": "down"},
 
-    # --- Industrial production ---
+    # =====================================================================
+    # Industrial production
+    # =====================================================================
     {"pattern": ["industrial production"],
      "higher": "up", "lower": "down"},
 
-    # --- Retail/Construction spending ---
+    # =====================================================================
+    # Construction spending
+    # =====================================================================
     {"pattern": ["construction spending"],
      "higher": "up", "lower": "down"},
 
-    # --- Vehicle sales ---
+    # =====================================================================
+    # Vehicle sales
+    # =====================================================================
     {"pattern": ["vehicle sales", "omdia"],
      "higher": "up", "lower": "down"},
 ]
@@ -94,6 +134,9 @@ def get_expected_direction(title: str,
       - 'up' / 'down' — очікуваний напрямок
       - 'flat' — якщо actual == forecast
       - None — якщо немає даних або правило не знайдено
+
+    УВАГА: бере ПЕРШЕ правило, яке матчить title.
+    Тому порядок у RULES критичний.
     """
     if not forecast or not actual:
         return None
