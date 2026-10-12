@@ -3,7 +3,6 @@
 
 ВАЖЛИВО: порядок правил критичний!
 `get_expected_direction` бере ПЕРШЕ правило, яке матчить title.
-Тому СПЕЦИФІЧНІ правила мають бути ПЕРЕД загальними.
 """
 
 import logging
@@ -14,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 RULES = [
     # =====================================================================
-    # USD: зайнятість — СПЕЦИФІЧНІ правила ПЕРЕД загальними!
+    # USD: зайнятість — СПЕЦИФІЧНІ ПЕРЕД загальними
     # =====================================================================
 
     # --- ADP Non-Farm Employment (risk-on логіка 2026) ---
@@ -51,14 +50,14 @@ RULES = [
      "higher": "up", "lower": "down"},
 
     # =====================================================================
-    # USD: інфляція — ПЕРЕД GDP, бо GDP Price Index — це теж інфляція
+    # USD: інфляція — ПЕРЕД GDP
     # =====================================================================
 
-    # --- GDP Price Index / Deflator (ціновий індекс, НЕ GDP!) ---
+    # GDP Price Index / Deflator (ціновий індекс, НЕ GDP)
     {"pattern": ["gdp price index", "gdp deflator"],
      "higher": "down", "lower": "up"},
 
-    # --- CPI, PPI, PCE ---
+    # CPI, PPI, PCE
     {"pattern": ["cpi m/m", "cpi y/y", "core cpi", "ppi m/m", "ppi y/y",
                  "core pce", "pce price index", "trimmed mean cpi",
                  "pce price index m/m", "core pce price index m/m",
@@ -66,7 +65,7 @@ RULES = [
      "higher": "down", "lower": "up"},
 
     # =====================================================================
-    # USD: GDP (загальне — ПІСЛЯ специфічних GDP Price Index)
+    # USD: GDP
     # =====================================================================
     {"pattern": ["gdp"],
      "higher": "up", "lower": "down"},
@@ -86,12 +85,17 @@ RULES = [
      "higher": "down", "lower": "up"},
 
     # =====================================================================
-    # ISM / PMI
+    # ISM / PMI — Manufacturing і Services реагують ПО-РІЗНОМУ
     # =====================================================================
-    {"pattern": ["ism manufacturing pmi", "ism services pmi",
-                 "final manufacturing pmi", "manufacturing pmi",
-                 "services pmi"],
+
+    # ISM Manufacturing: сильні дані → risk-on → up
+    {"pattern": ["ism manufacturing pmi", "manufacturing pmi"],
      "higher": "up", "lower": "down"},
+
+    # ISM Services: сильні дані → hawkish Fed → down
+    #               слабкі дані → dovish Fed → up
+    {"pattern": ["ism services pmi", "services pmi"],
+     "higher": "down", "lower": "up"},
 
     # =====================================================================
     # Consumer Confidence
@@ -141,7 +145,6 @@ def get_expected_direction(title: str,
       - None — якщо немає даних або правило не знайдено
 
     УВАГА: бере ПЕРШЕ правило, яке матчить title.
-    Тому порядок у RULES критичний.
     """
     if not forecast or not actual:
         return None
@@ -204,7 +207,7 @@ def classify_hit(expected: Optional[str], actual: Optional[str],
       MISS      — не справдився
       NEUTRAL   — хтось із них 'flat'
       N/A       — немає expected або actual
-      NO_DATA   — взагалі немає forecast/actual (наприклад, виступи)
+      NO_DATA   — взагалі немає forecast/actual
     """
     if not has_data:
         return "NO_DATA"
