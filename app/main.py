@@ -8,6 +8,8 @@ Scheduler:
   - load_history_sync — кожні 24 години
   - recompute_impact_job — кожні 30 хвилин
   - paper_engine_job — кожні 5 хвилин
+  - check_upcoming_events — кожну хвилину (нагадування)
+  - weekly_report_job — неділя 20:00 UTC
 """
 
 import asyncio
@@ -32,7 +34,11 @@ from app.prices.bybit_ws import start_ws_thread
 from app.prices.history import load_history_sync
 from app.impact.batch import process_all_past_events
 from app.impact.stats import get_stats, get_heatmap, get_cross_asset_detail
-from app.bot.notifier import notify_impact
+from app.bot.notifier import (
+    notify_impact,
+    notify_event_soon,
+    notify_weekly_report,
+)
 from app.paper.engine import process_paper_engine
 from app.paper.stats import get_account, get_trades, get_equity_curve, reset_account
 
@@ -166,6 +172,7 @@ async def recompute_impact_job():
             await manager.broadcast({"type": "impact_recomputed", **stats})
             for eid in pending:
                 await notify_impact(eid)
+                await asyncio.sleep(0.3)
         return stats
     except Exception as ex:
         logger.exception(f"Impact recompute failed: {ex}")
@@ -181,6 +188,44 @@ async def paper_engine_job():
     except Exception as ex:
         logger.exception(f"Paper engine failed: {ex}")
         return {"error": str(ex)}
+
+
+async def check_upcoming_events():
+    """Кожну хвилину перевіряє high-події в межах 4-6 хв від зараз."""
+    try:
+        now = datetime.now(timezone.utc)
+        lo = (now + timedelta(minutes=4)).isoformat()
+        hi = (now + timedelta(minutes=6)).isoformat()
+
+        async with get_db() as db:
+            cur = await db.execute("""
+                SELECT id, title, importance, time_utc
+                FROM events
+                WHERE time_utc BETWEEN ? AND ?
+                  AND importance = 'high'
+                  AND id NOT IN (SELECT event_id FROM event_reminders)
+            """, (lo, hi))
+            upcoming = await cur.fetchall()
+
+            for ev in upcoming:
+                await notify_event_soon(ev["id"], minutes_before=5)
+                await db.execute(
+                    "INSERT OR IGNORE INTO event_reminders (event_id, sent_at) VALUES (?, ?)",
+                    (ev["id"], now.isoformat()),
+                )
+            if upcoming:
+                await db.commit()
+                logger.info(f"Sent {len(upcoming)} event reminders")
+    except Exception as ex:
+        logger.exception(f"check_upcoming_events failed: {ex}")
+
+
+async def weekly_report_job():
+    try:
+        await notify_weekly_report()
+        logger.info("Weekly report sent")
+    except Exception as ex:
+        logger.exception(f"weekly_report_job failed: {ex}")
 
 
 async def live_broadcast_loop():
@@ -223,6 +268,10 @@ async def lifespan(app: FastAPI):
                       minutes=30, id="impact_recompute_auto")
     scheduler.add_job(paper_engine_job, "interval",
                       minutes=5, id="paper_engine")
+    scheduler.add_job(check_upcoming_events, "interval",
+                      minutes=1, id="check_upcoming")
+    scheduler.add_job(weekly_report_job, CronTrigger(day_of_week="sun", hour=20, minute=0),
+                      id="weekly_report")
     scheduler.start()
     logger.info(f"Scheduler started. Jobs: {[j.id for j in scheduler.get_jobs()]}")
 
@@ -355,7 +404,6 @@ async def api_events_calendar(days: int = 7):
 
 @app.get("/events/upcoming_high")
 async def api_events_upcoming_high(days: int = 7, limit: int = 20):
-    """Найближчі high-importance події."""
     from_iso = datetime.now(timezone.utc).isoformat()
     to_iso = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
 
@@ -370,6 +418,72 @@ async def api_events_upcoming_high(days: int = 7, limit: int = 20):
             LIMIT ?
         """, (from_iso, to_iso, limit))
         rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.get("/events/next_high")
+async def api_events_next_high():
+    """Повертає найближчу high-подію і скільки до неї часу."""
+    now = datetime.now(timezone.utc)
+
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT id, title, country, importance, time_utc, forecast_value
+            FROM events
+            WHERE time_utc > ?
+              AND importance = 'high'
+            ORDER BY time_utc ASC
+            LIMIT 1
+        """, (now.isoformat(),))
+        row = await cur.fetchone()
+
+    if not row:
+        return {"next_high": None}
+
+    target = datetime.fromisoformat(row["time_utc"].replace("Z", "+00:00"))
+    delta = target - now
+    total_seconds = int(delta.total_seconds())
+    days = total_seconds // 86400
+    hours = (total_seconds % 86400) // 3600
+    minutes = (total_seconds % 3600) // 60
+
+    return {
+        "next_high": dict(row),
+        "seconds_until": total_seconds,
+        "days": days,
+        "hours": hours,
+        "minutes": minutes,
+    }
+
+
+@app.get("/events/compare")
+async def api_events_compare(days_back: int = 30, limit: int = 100):
+    """Порівняння SOL/BTC/ETH по кожній події."""
+    from_iso = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT
+                e.id, e.title, e.country, e.importance, e.time_utc,
+                e.forecast_value, e.actual_value,
+                MAX(CASE WHEN ei.symbol = 'SOLUSDT' THEN ei.ret_15m END) AS sol_ret15,
+                MAX(CASE WHEN ei.symbol = 'SOLUSDT' THEN ei.dir_15m END) AS sol_dir,
+                MAX(CASE WHEN ei.symbol = 'SOLUSDT' THEN ei.hit END) AS sol_hit,
+                MAX(CASE WHEN ei.symbol = 'BTCUSDT' THEN ei.ret_15m END) AS btc_ret15,
+                MAX(CASE WHEN ei.symbol = 'BTCUSDT' THEN ei.dir_15m END) AS btc_dir,
+                MAX(CASE WHEN ei.symbol = 'BTCUSDT' THEN ei.hit END) AS btc_hit,
+                MAX(CASE WHEN ei.symbol = 'ETHUSDT' THEN ei.ret_15m END) AS eth_ret15,
+                MAX(CASE WHEN ei.symbol = 'ETHUSDT' THEN ei.dir_15m END) AS eth_dir,
+                MAX(CASE WHEN ei.symbol = 'ETHUSDT' THEN ei.hit END) AS eth_hit
+            FROM events e
+            JOIN event_impact ei ON ei.event_id = e.id
+            WHERE e.time_utc >= ?
+            GROUP BY e.id
+            ORDER BY e.time_utc DESC
+            LIMIT ?
+        """, (from_iso, limit))
+        rows = await cur.fetchall()
+
     return [dict(r) for r in rows]
 
 
@@ -688,11 +802,10 @@ async def api_paper_run():
 
 
 # ============================================================================
-# API: Tools (для вкладки «Інструменти»)
+# API: Tools
 # ============================================================================
 @app.post("/tools/recompute_impact")
 async def tools_recompute_impact(limit: int = Query(1000, ge=1, le=10000)):
-    """Перерахувати impact для всіх минулих подій."""
     stats = await process_all_past_events(limit=limit)
     await manager.broadcast({"type": "impact_recomputed", **stats})
     return stats
@@ -700,7 +813,6 @@ async def tools_recompute_impact(limit: int = Query(1000, ge=1, le=10000)):
 
 @app.post("/tools/run_paper_engine")
 async def tools_run_paper_engine():
-    """Запустити paper engine вручну."""
     stats = await process_paper_engine()
     await manager.broadcast({"type": "paper_updated", **stats})
     return stats
@@ -708,7 +820,6 @@ async def tools_run_paper_engine():
 
 @app.post("/tools/load_history")
 async def tools_load_history(days: int = Query(2, ge=1, le=90), interval: str = "1"):
-    """Довантажити свічки через REST Bybit."""
     try:
         total = await asyncio.to_thread(load_history_sync, days, interval)
         return {"loaded": total, "days": days, "interval": interval}
@@ -719,13 +830,11 @@ async def tools_load_history(days: int = Query(2, ge=1, le=90), interval: str = 
 
 @app.post("/tools/refresh_calendar")
 async def tools_refresh_calendar(day: str = "today"):
-    """Парсити ForexFactory (day=today|tomorrow|yesterday)."""
     return await refresh_calendar(day=day)
 
 
 @app.post("/tools/load_calendar_week")
 async def tools_load_calendar_week(week: str = "this"):
-    """Завантажити тиждень подій з ForexFactory (week=this|last|next)."""
     total_inserted = 0
     per_week: dict = {}
     weeks = [week]
@@ -763,7 +872,6 @@ async def tools_load_calendar_week(week: str = "this"):
 
 @app.post("/tools/clear_impact")
 async def tools_clear_impact():
-    """ОЧИСТИТИ всю таблицю event_impact (небезпечно!)."""
     async with get_db() as db:
         cur = await db.execute("SELECT COUNT(*) AS n FROM event_impact")
         n_before = (await cur.fetchone())["n"]
@@ -775,21 +883,17 @@ async def tools_clear_impact():
 
 @app.get("/tools/db_stats")
 async def tools_db_stats():
-    """Загальна статистика БД."""
     async with get_db() as db:
         stats = {}
 
-        # Кількість подій
         cur = await db.execute("SELECT COUNT(*) AS n FROM events")
         stats["events_total"] = (await cur.fetchone())["n"]
 
-        # По важливості
         cur = await db.execute("""
             SELECT importance, COUNT(*) AS n FROM events GROUP BY importance
         """)
         stats["events_by_importance"] = {r["importance"]: r["n"] for r in await cur.fetchall()}
 
-        # Свічки
         cur = await db.execute("""
             SELECT symbol, COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx
             FROM prices GROUP BY symbol
@@ -803,25 +907,21 @@ async def tools_db_stats():
                 "max_ts": r["mx"],
             })
 
-        # Impact по hit
         cur = await db.execute("""
             SELECT hit, COUNT(*) AS n FROM event_impact GROUP BY hit
         """)
         stats["impact_by_hit"] = {r["hit"]: r["n"] for r in await cur.fetchall()}
 
-        # Impact по symbol
         cur = await db.execute("""
             SELECT symbol, COUNT(*) AS n FROM event_impact GROUP BY symbol
         """)
         stats["impact_by_symbol"] = {r["symbol"]: r["n"] for r in await cur.fetchall()}
 
-        # Paper trades
         cur = await db.execute("""
             SELECT status, COUNT(*) AS n FROM paper_trades GROUP BY status
         """)
         stats["paper_trades"] = {r["status"]: r["n"] for r in await cur.fetchall()}
 
-        # Account
         cur = await db.execute("SELECT balance, initial_balance FROM paper_account WHERE id=1")
         acc = await cur.fetchone()
         if acc:
@@ -833,17 +933,71 @@ async def tools_db_stats():
     return stats
 
 
+@app.get("/tools/db_tables")
+async def tools_db_tables():
+    """Розмір таблиць БД."""
+    import os
+    from app.config import settings as _settings
+
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+        """)
+        tables = [r["name"] for r in await cur.fetchall()]
+
+        result = []
+        for table in tables:
+            try:
+                cur = await db.execute(f"SELECT COUNT(*) AS n FROM {table}")
+                n = (await cur.fetchone())["n"]
+
+                size_bytes = None
+                try:
+                    cur = await db.execute(
+                        "SELECT SUM(pgsize) AS sz FROM dbstat WHERE name = ?",
+                        (table,)
+                    )
+                    row = await cur.fetchone()
+                    if row and row["sz"] is not None:
+                        size_bytes = row["sz"]
+                except Exception:
+                    pass
+
+                result.append({
+                    "table": table,
+                    "rows": n,
+                    "size_bytes": size_bytes,
+                    "size_mb": round(size_bytes / 1024 / 1024, 3) if size_bytes else None,
+                })
+            except Exception as ex:
+                result.append({"table": table, "error": str(ex)})
+
+    db_path = _settings.db_path_abs
+    total_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+
+    return {
+        "db_path": db_path,
+        "db_total_bytes": total_size,
+        "db_total_mb": round(total_size / 1024 / 1024, 3),
+        "tables": result,
+    }
+
+
 @app.get("/tools/logs")
-async def tools_logs(lines: int = 100):
-    """Останні N рядків логів сервісу."""
+async def tools_logs(lines: int = 100, grep: str | None = None):
+    """Останні N рядків логів з опційним grep."""
     try:
-        result = subprocess.run(
-            ["journalctl", "-u", "newsbot.service", "-n", str(lines), "--no-pager", "-o", "cat"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return {"lines": result.stdout.split("\n")}
+        cmd = ["journalctl", "-u", "newsbot.service", "-n", str(lines),
+               "--no-pager", "-o", "cat"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        output = result.stdout.split("\n")
+
+        if grep:
+            output = [l for l in output if grep.lower() in l.lower()]
+
+        return {"lines": output, "count": len(output), "grep": grep}
     except FileNotFoundError:
         return {"error": "journalctl недоступний (не systemd?)"}
     except Exception as ex:
@@ -852,9 +1006,7 @@ async def tools_logs(lines: int = 100):
 
 @app.get("/tools/diagnostics")
 async def tools_diagnostics():
-    """Діагностика: розбивка impact по hit/importance."""
     async with get_db() as db:
-        # Загальна
         cur = await db.execute("""
             SELECT
                 COUNT(*) AS n,
@@ -868,7 +1020,6 @@ async def tools_diagnostics():
         """)
         overall = dict(await cur.fetchone())
 
-        # По importance
         cur = await db.execute("""
             SELECT
                 importance,

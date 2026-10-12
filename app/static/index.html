@@ -122,17 +122,20 @@
 <body class="min-h-screen">
 
 <nav class="bg-slate-800 border-b border-slate-700 px-6 py-3">
-  <div class="max-w-7xl mx-auto flex items-center gap-6">
+  <div class="max-w-7xl mx-auto flex items-center gap-6 flex-wrap">
     <a href="#" class="text-xl font-bold text-cyan-400">📊 News Bot</a>
     <button onclick="refreshAll()" id="refresh-all-btn"
-            class="ml-4 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm tip"
+            class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm tip"
             data-tip="Оновити всі дані (події, impact, paper).">
       ⟳ Оновити все
     </button>
-    <span class="ml-auto text-sm text-slate-500">
-      SOL/BTC/ETH · <span id="ws-status" class="text-red-400">● offline</span>
-      · <span class="tip" data-tip="Час у веб-панелі — за Києвом (Europe/Kyiv). У дужках — UTC.">🕒 Київ</span>
-      · <span class="equity-badge tip" data-tip="Поточний equity paper-акаунту" id="nav-equity">$100.00</span>
+    <span id="next-high-badge"
+          class="equity-badge tip"
+          data-tip="Наступна high-подія">⏰ —</span>
+    <span class="ml-auto flex items-center gap-3 text-sm text-slate-500 flex-wrap">
+      <span>SOL/BTC/ETH · <span id="ws-status" class="text-red-400">● offline</span></span>
+      <span>· <span class="tip" data-tip="Час у веб-панелі — за Києвом (Europe/Kyiv). У дужках — UTC.">🕒 Київ</span></span>
+      <span>· <span class="equity-badge tip" data-tip="Поточний equity paper-акаунту" id="nav-equity">$100.00</span></span>
     </span>
   </div>
 </nav>
@@ -145,6 +148,7 @@
     <div class="tab" data-tab="impact">Вплив</div>
     <div class="tab" data-tab="paper">💰 Paper</div>
     <div class="tab" data-tab="calendar">📅 Календар</div>
+    <div class="tab" data-tab="compare">⚖️ Порівняння</div>
     <div class="tab" data-tab="heatmap">Heatmap</div>
     <div class="tab" data-tab="tools">🔧 Інструменти</div>
     <div class="tab" data-tab="help">Довідка</div>
@@ -513,6 +517,36 @@
     </div>
   </div>
 
+  <!-- ==================== COMPARE ==================== -->
+  <div id="tab-compare" style="display:none">
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+      <h1 class="text-2xl font-bold">⚖️ SOL vs BTC vs ETH</h1>
+      <div class="flex gap-2 items-center">
+        <select id="compare-days" class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200" onchange="loadCompare()">
+          <option value="7">7 днів</option>
+          <option value="30" selected>30 днів</option>
+          <option value="90">90 днів</option>
+        </select>
+        <span class="text-xs text-slate-500">Клік на подію → деталі</span>
+      </div>
+    </div>
+    <div class="card p-4">
+      <table>
+        <thead><tr>
+          <th>Час (Київ / UTC)</th>
+          <th>Подія</th>
+          <th class="text-center">Важл.</th>
+          <th class="text-right">SOL ret 15хв</th>
+          <th class="text-right">BTC ret 15хв</th>
+          <th class="text-right">ETH ret 15хв</th>
+          <th class="text-right tip" data-tip="SOL ret − BTC ret. Якщо >0 — SOL сильніший.">Excess SOL-BTC</th>
+          <th class="text-center">SOL / BTC / ETH</th>
+        </tr></thead>
+        <tbody id="compare-tbody"><tr><td colspan="8"><span class="loading"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ==================== HEATMAP ==================== -->
   <div id="tab-heatmap" style="display:none">
     <h1 class="text-2xl font-bold mb-6">Heatmap — активність новин</h1>
@@ -550,152 +584,153 @@
     </div>
   </div>
 
-
   <!-- ==================== TOOLS ==================== -->
-<div id="tab-tools" style="display:none">
-  <h1 class="text-2xl font-bold mb-6">🔧 Інструменти</h1>
+  <div id="tab-tools" style="display:none">
+    <h1 class="text-2xl font-bold mb-6">🔧 Інструменти</h1>
 
-  <!-- Управління -->
-  <div class="card p-4 mb-6">
-    <h2 class="section-title">⚙ Управління</h2>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <!-- Управління -->
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">⚙ Управління</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
 
-      <!-- Перерахувати impact -->
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">⟳ Перерахувати impact</div>
-        <div class="hint mb-2">Перерахувати вплив для всіх минулих подій. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /impact/recompute</code></div>
-        <div class="flex gap-2 items-center">
-          <label class="text-xs text-slate-400">Limit:</label>
-          <input type="number" id="tool-impact-limit" value="1000" min="1" max="10000"
-                 class="w-24 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-          <button onclick="toolRecomputeImpact()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">⟳ Перерахувати impact</div>
+          <div class="hint mb-2">Перерахувати вплив для всіх минулих подій.</div>
+          <div class="flex gap-2 items-center">
+            <label class="text-xs text-slate-400">Limit:</label>
+            <input type="number" id="tool-impact-limit" value="1000" min="1" max="10000"
+                   class="w-24 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <button onclick="toolRecomputeImpact()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
+          </div>
         </div>
-      </div>
 
-      <!-- Запустити paper engine -->
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">▶ Запустити paper engine</div>
-        <div class="hint mb-2">Перевірити нові події та відкрити віртуальні угоди. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /paper/run</code></div>
-        <button onclick="toolRunPaper()" class="mt-2 px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
-      </div>
-
-      <!-- Довантажити свічки -->
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">📥 Довантажити свічки</div>
-        <div class="hint mb-2">Завантажити історичні свічки через REST Bybit. Еквівалент: <code class="bg-slate-700 px-1 rounded">python scripts/load_history.py N</code></div>
-        <div class="flex gap-2 items-center">
-          <label class="text-xs text-slate-400">Днів:</label>
-          <input type="number" id="tool-history-days" value="2" min="1" max="90"
-                 class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-          <button onclick="toolLoadHistory()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">▶ Запустити paper engine</div>
+          <div class="hint mb-2">Перевірити нові події та відкрити віртуальні угоди.</div>
+          <button onclick="toolRunPaper()" class="mt-2 px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
         </div>
-      </div>
 
-      <!-- Оновити календар today -->
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">📅 Оновити календар (today)</div>
-        <div class="hint mb-2">Парсити ForexFactory за сьогодні. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /events/load_history</code></div>
-        <button onclick="toolRefreshCalendar()" class="mt-2 px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Парсити today</button>
-      </div>
-
-      <!-- Завантажити тиждень -->
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">📅 Завантажити тиждень</div>
-        <div class="hint mb-2">Завантажити this/last/next тиждень з ForexFactory.</div>
-        <div class="flex gap-2 items-center">
-          <select id="tool-calendar-week" class="px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-            <option value="this">this</option>
-            <option value="last">last</option>
-            <option value="next">next</option>
-          </select>
-          <button onclick="toolLoadCalendarWeek()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📥 Довантажити свічки</div>
+          <div class="hint mb-2">Завантажити історичні свічки через REST Bybit.</div>
+          <div class="flex gap-2 items-center">
+            <label class="text-xs text-slate-400">Днів:</label>
+            <input type="number" id="tool-history-days" value="2" min="1" max="90"
+                   class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <button onclick="toolLoadHistory()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+          </div>
         </div>
-      </div>
 
-      <!-- Найближчі high події -->
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">🔥 Найближчі high події</div>
-        <div class="hint mb-2">Показати всі high-importance події у наступні 7 днів.</div>
-        <button onclick="toolShowUpcoming()" class="mt-2 px-3 py-1 bg-amber-700 hover:bg-amber-600 rounded text-sm">Показати</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Результат останньої дії -->
-  <div class="card p-4 mb-6" id="tools-result-card" style="display:none">
-    <h2 class="section-title">
-      📋 Результат останньої дії
-      <button onclick="hideToolsResult()" class="text-xs text-slate-500 hover:text-slate-300 ml-auto">✕</button>
-    </h2>
-    <pre id="tools-result" class="text-xs font-mono text-slate-300 bg-slate-900 p-3 rounded overflow-auto max-h-96"></pre>
-  </div>
-
-  <!-- Найближчі high події (результат) -->
-  <div class="card p-4 mb-6" id="tools-upcoming-card" style="display:none">
-    <h2 class="section-title">🔥 Найближчі high події</h2>
-    <table>
-      <thead><tr>
-        <th>Час (Київ / UTC)</th>
-        <th>Вал.</th>
-        <th>Подія</th>
-        <th class="text-right">Forecast</th>
-        <th class="text-right">Previous</th>
-      </tr></thead>
-      <tbody id="tools-upcoming-tbody"></tbody>
-    </table>
-  </div>
-
-  <!-- Діагностика -->
-  <div class="card p-4 mb-6">
-    <h2 class="section-title">🩺 Діагностика</h2>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">📊 Статистика БД</div>
-        <div class="hint mb-2">Кількість подій, свічок, impact, угод + баланс.</div>
-        <button onclick="toolDbStats()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
-      </div>
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">📋 Логи сервісу</div>
-        <div class="hint mb-2">Останні N рядків journalctl для newsbot.service.</div>
-        <div class="flex gap-2 items-center mt-2">
-          <input type="number" id="tool-logs-lines" value="100" min="10" max="500"
-                 class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-          <button onclick="toolLogs()" class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📅 Оновити календар (today)</div>
+          <div class="hint mb-2">Парсити ForexFactory за сьогодні.</div>
+          <button onclick="toolRefreshCalendar()" class="mt-2 px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Парсити today</button>
         </div>
-      </div>
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">🔍 Діагностика impact</div>
-        <div class="hint mb-2">Розбивка impact по hit і importance.</div>
-        <button onclick="toolDiagnostics()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
-      </div>
-      <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
-        <div class="font-semibold mb-1">📤 Експорт CSV</div>
-        <div class="hint mb-2">Завантажити події або угоди у CSV.</div>
-        <div class="flex gap-2 mt-2">
-          <button onclick="window.location.href='/events/export.csv?days_back=30'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Події</button>
-          <button onclick="window.location.href='/paper/trades/export.csv'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Угоди</button>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📅 Завантажити тиждень</div>
+          <div class="hint mb-2">Завантажити this/last/next тиждень з ForexFactory.</div>
+          <div class="flex gap-2 items-center">
+            <select id="tool-calendar-week" class="px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+              <option value="this">this</option>
+              <option value="last">last</option>
+              <option value="next">next</option>
+            </select>
+            <button onclick="toolLoadCalendarWeek()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+          </div>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">🔥 Найближчі high події</div>
+          <div class="hint mb-2">Показати всі high-importance події у наступні 7 днів.</div>
+          <button onclick="toolShowUpcoming()" class="mt-2 px-3 py-1 bg-amber-700 hover:bg-amber-600 rounded text-sm">Показати</button>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Небезпечні дії -->
-  <div class="card p-4 mb-6 border-red-900">
-    <h2 class="section-title text-red-400">⚠ Небезпечні дії</h2>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-      <div class="bg-red-950/30 p-3 rounded border border-red-900">
-        <div class="font-semibold mb-1 text-red-300">🗑 Очистити impact</div>
-        <div class="hint mb-2">Видалити всі записи з <code class="bg-slate-700 px-1 rounded">event_impact</code>. Після цього потрібно перерахувати. Еквівалент: <code class="bg-slate-700 px-1 rounded">DELETE FROM event_impact</code></div>
-        <button onclick="toolClearImpact()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">🗑 Очистити</button>
+    <!-- Результат останньої дії -->
+    <div class="card p-4 mb-6" id="tools-result-card" style="display:none">
+      <h2 class="section-title">
+        📋 Результат останньої дії
+        <button onclick="hideToolsResult()" class="text-xs text-slate-500 hover:text-slate-300 ml-auto">✕</button>
+      </h2>
+      <pre id="tools-result" class="text-xs font-mono text-slate-300 bg-slate-900 p-3 rounded overflow-auto max-h-96"></pre>
+    </div>
+
+    <!-- Найближчі high події -->
+    <div class="card p-4 mb-6" id="tools-upcoming-card" style="display:none">
+      <h2 class="section-title">🔥 Найближчі high події</h2>
+      <table>
+        <thead><tr>
+          <th>Час (Київ / UTC)</th>
+          <th>Вал.</th>
+          <th>Подія</th>
+          <th class="text-right">Forecast</th>
+          <th class="text-right">Previous</th>
+        </tr></thead>
+        <tbody id="tools-upcoming-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Діагностика -->
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">🩺 Діагностика</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📊 Статистика БД</div>
+          <div class="hint mb-2">Кількість подій, свічок, impact, угод + баланс.</div>
+          <button onclick="toolDbStats()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">💾 Розмір БД</div>
+          <div class="hint mb-2">Таблиці, кількість рядків, розміри у МБ.</div>
+          <button onclick="toolDbTables()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+          <div id="db-tables-result" class="mt-3"></div>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📋 Логи сервісу</div>
+          <div class="hint mb-2">Останні N рядків journalctl. Можна фільтрувати по grep.</div>
+          <div class="flex gap-2 items-center mt-2 flex-wrap">
+            <input type="number" id="tool-logs-lines" value="100" min="10" max="500"
+                   class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm" placeholder="N">
+            <input type="text" id="tool-logs-grep" placeholder="grep (опційно)"
+                   class="w-40 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <button onclick="toolLogs()" class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+          </div>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">🔍 Діагностика impact</div>
+          <div class="hint mb-2">Розбивка impact по hit і importance.</div>
+          <button onclick="toolDiagnostics()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700 md:col-span-2">
+          <div class="font-semibold mb-1">📤 Експорт CSV</div>
+          <div class="hint mb-2">Завантажити події або угоди у CSV.</div>
+          <div class="flex gap-2 mt-2">
+            <button onclick="window.location.href='/events/export.csv?days_back=30'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Події</button>
+            <button onclick="window.location.href='/paper/trades/export.csv'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Угоди</button>
+          </div>
+        </div>
       </div>
-      <div class="bg-red-950/30 p-3 rounded border border-red-900">
-        <div class="font-semibold mb-1 text-red-300">↺ Скинути paper акаунт</div>
-        <div class="hint mb-2">Скинути баланс до $100 і видалити всі угоди. Еквівалент: <code class="bg-slate-700 px-1 rounded">POST /paper/reset</code></div>
-        <button onclick="toolResetPaper()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">↺ Скинути</button>
+    </div>
+
+    <!-- Небезпечні дії -->
+    <div class="card p-4 mb-6 border-red-900">
+      <h2 class="section-title text-red-400">⚠ Небезпечні дії</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="bg-red-950/30 p-3 rounded border border-red-900">
+          <div class="font-semibold mb-1 text-red-300">🗑 Очистити impact</div>
+          <div class="hint mb-2">Видалити всі записи з <code class="bg-slate-700 px-1 rounded">event_impact</code>.</div>
+          <button onclick="toolClearImpact()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">🗑 Очистити</button>
+        </div>
+        <div class="bg-red-950/30 p-3 rounded border border-red-900">
+          <div class="font-semibold mb-1 text-red-300">↺ Скинути paper акаунт</div>
+          <div class="hint mb-2">Скинути баланс до $100 і видалити всі угоди.</div>
+          <button onclick="toolResetPaper()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">↺ Скинути</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
   <!-- ==================== HELP ==================== -->
   <div id="tab-help" style="display:none">
@@ -705,80 +740,38 @@
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">📈 Графік: zoom і маркери угод</h2>
       <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside ml-4">
         <li><b>Колесо мишки</b> — zoom in/out</li>
-        <li><b>Drag</b> (затиснути і тягнути) — переміщення</li>
+        <li><b>Drag</b> — переміщення</li>
         <li><b>Подвійний клік</b> — скинути zoom</li>
-        <li><b>Кнопки + / − / Reset</b> — у правому верхньому куті графіка</li>
         <li><b>▲ зелений</b> — LONG entry</li>
         <li><b>▼ червоний</b> — SHORT entry</li>
         <li><b>◆ ромб</b> — exit (колір = P&L)</li>
-        <li>Наведи на маркер — побачиш деталі угоди</li>
       </ul>
     </div>
 
     <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">🔍 Фільтри і пошук (вкладка «Події»)</h2>
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">🔔 Telegram сповіщення</h2>
       <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside ml-4">
-        <li><b>Пошук</b> — шукає по назві події (case-insensitive), оновлюється через 300мс після введення</li>
-        <li><b>Фільтр дат</b> — 24 год / 7 днів / 30 днів / 90 днів / всі</li>
-        <li><b>Фільтр важливості</b> — high / medium / low</li>
-        <li><b>⬇ CSV</b> — завантажує CSV з поточними фільтрами</li>
+        <li><b>Real-time HIT/MISS</b> — коли impact розрахований</li>
+        <li><b>Нагадування за 5 хв</b> — перед high-подією</li>
+        <li><b>Щотижневий звіт</b> — у неділю о 20:00 UTC</li>
       </ul>
     </div>
 
     <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">📅 Календар подій</h2>
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">💰 Paper Trading</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
-        Групує майбутні події по днях. Показує час (за Києвом), важливість, валюту, назву.
-        Клік на подію → відкриває деталі. Можна вибрати 3 / 7 / 14 / 30 днів наперед.
+        SPOT + LONG-only. Фільтри: importance=high, hit=HIT/MISS, hit_rate≥60%, |ret_15m|≥0.3%.<br>
+        Вхід: close T+1. Вихід: close T+60. Комісія: 0.1% + slippage 0.05%.<br>
+        Символи: SOLUSDT + BTCUSDT. Розмір: $10 за угоду.
       </p>
     </div>
 
-    <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">💰 Paper Trading — як працює</h2>
-      <p class="text-slate-300 text-sm leading-relaxed mb-3">
-        Автоматично відкриває віртуальні угоди, коли:
-      </p>
-      <ol class="text-sm text-slate-300 space-y-1 list-decimal list-inside ml-4">
-        <li>Подія має <b>importance = high</b></li>
-        <li>Impact розрахований, і <b>hit = HIT або MISS</b></li>
-        <li>Hit rate по цьому title <b>≥ 60%</b> (з n ≥ 1 у тестовому режимі)</li>
-        <li>Відкрито менше ніж <b>6</b> угод одночасно</li>
-      </ol>
-      <p class="text-slate-300 text-sm leading-relaxed mt-3">
-        <b>Режим:</b> SPOT + LONG-only. Події з `expected_dir = down` <b>пропускаються</b>.<br>
-        <b>Вхід:</b> close свічки T+1.<br>
-        <b>Розмір:</b> $10 за угоду.<br>
-        <b>Комісія:</b> 0.1% (Bybit spot taker) + slippage 0.05%.<br>
-        <b>Вихід:</b> close свічки T+60.<br>
-        <b>Символи:</b> <span class="badge-sol px-2 py-0.5 rounded text-xs">SOLUSDT</span> + <span class="badge-btc px-2 py-0.5 rounded text-xs">BTCUSDT</span>.
-      </p>
-    </div>
-
-    <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Перемикач символів на вкладці «Вплив»</h2>
-      <p class="text-slate-300 text-sm leading-relaxed">
-        Кнопки <b>SOL / BTC / ETH / Всі</b> фільтрують статистику за символом.<br><br>
-        <b>SOL</b> — показує тільки реакцію SOLUSDT.<br>
-        <b>BTC / ETH</b> — для порівняння.<br>
-        <b>Всі (разом)</b> — середнє по всіх трьох.
-      </p>
-    </div>
-
-    <div class="card p-6 mb-4">
+    <div class="card p-6">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Про час</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
         Усі розрахунки ведуться в <b>UTC</b>.<br>
         У веб-інтерфейсі час показується у <b>Europe/Kyiv</b>, UTC — у дужках.
       </p>
-    </div>
-
-    <div class="card p-6">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">Джерела даних</h2>
-      <ul class="text-sm text-slate-300 space-y-2">
-        <li><b>Новини:</b> ForexFactory.</li>
-        <li><b>Ціни:</b> Bybit Spot API (WebSocket + REST).</li>
-        <li><b>Символи:</b> SOLUSDT, BTCUSDT, ETHUSDT.</li>
-      </ul>
     </div>
   </div>
 </main>
@@ -802,7 +795,7 @@ function registerZoomPlugin() {
   }
   const plugin = window.ChartZoom || window.chartjsPluginZoom;
   if (!plugin) {
-    console.warn('⚠️ Chart.js Zoom plugin не завантажено — zoom вимкнено');
+    console.warn('⚠️ Chart.js Zoom plugin не завантажено');
     return false;
   }
   try {
@@ -872,19 +865,19 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    ['live','dashboard','events','impact','paper','calendar','heatmap','tools','help'].forEach(name => {
-      document.getElementById('tab-' + name).style.display = name === t.dataset.tab ? '' : 'none';
+    ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','help'].forEach(name => {
+      const el = document.getElementById('tab-' + name);
+      if (el) el.style.display = name === t.dataset.tab ? '' : 'none';
     });
     if (t.dataset.tab === 'events') loadEvents();
     if (t.dataset.tab === 'impact') loadImpact();
     if (t.dataset.tab === 'paper') loadPaper();
     if (t.dataset.tab === 'calendar') loadCalendar();
+    if (t.dataset.tab === 'compare') loadCompare();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
-    // tools — без автозавантаження, все по кнопках
   };
 });
-
 
 // ==================== HELPERS ====================
 const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(3) + '%';
@@ -991,6 +984,37 @@ async function refreshAll() {
   }, 1500);
 }
 
+// ==================== NEXT HIGH EVENT ====================
+async function loadNextHigh() {
+  try {
+    const data = await api('/events/next_high');
+    const badge = document.getElementById('next-high-badge');
+    if (!data.next_high) {
+      badge.textContent = '⏰ немає high';
+      return;
+    }
+    const ev = data.next_high;
+    const d = data.days;
+    const h = data.hours;
+    const m = data.minutes;
+
+    let timing = '';
+    if (d > 0) timing = `${d}д ${h}г`;
+    else if (h > 0) timing = `${h}г ${m}хв`;
+    else timing = `${m}хв`;
+
+    badge.textContent = `⏰ ${ev.title.slice(0, 20)}${ev.title.length > 20 ? '…' : ''} — ${timing}`;
+    badge.title = `${ev.title} (${ev.country})\nЧерез ${timing}`;
+
+    const totalSec = data.seconds_until;
+    if (totalSec < 300) badge.style.color = '#ef4444';
+    else if (totalSec < 3600) badge.style.color = '#f59e0b';
+    else badge.style.color = '';
+  } catch (e) {
+    console.error('loadNextHigh failed', e);
+  }
+}
+
 // ==================== LIVE ====================
 function fmtSeconds(s) {
   if (s < 60) return `${s}с`;
@@ -1081,6 +1105,43 @@ async function loadLiveRecent() {
       <td class="text-center">${hitBadge(e.hit)}</td>
     </tr>
   `).join('') || '<tr><td colspan="7" class="text-slate-500">Немає даних</td></tr>';
+}
+
+// ==================== COMPARE ====================
+async function loadCompare() {
+  const days = document.getElementById('compare-days').value;
+  const rows = await api(`/events/compare?days_back=${days}&limit=100`);
+
+  const tbody = document.getElementById('compare-tbody');
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">Немає даних за цей період</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const excess = (r.sol_ret15 != null && r.btc_ret15 != null)
+      ? r.sol_ret15 - r.btc_ret15
+      : null;
+    const excessCls = excess == null ? 'flat' : excess > 0.05 ? 'up' : excess < -0.05 ? 'down' : 'flat';
+    const excessText = excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(3) + '%';
+
+    const solBadge = r.sol_hit ? hitBadge(r.sol_hit) : '—';
+    const btcBadge = r.btc_hit ? hitBadge(r.btc_hit) : '—';
+    const ethBadge = r.eth_hit ? hitBadge(r.eth_hit) : '—';
+
+    return `
+      <tr class="cursor-pointer" onclick="openEvent(${r.id})">
+        <td class="font-mono text-xs">${fmtBothFull(r.time_utc)}</td>
+        <td class="text-cyan-400">${r.title}</td>
+        <td class="text-center">${badge(r.importance)}</td>
+        <td class="text-right font-mono ${clsForDir(r.sol_dir)}">${fmtPct(r.sol_ret15)}</td>
+        <td class="text-right font-mono ${clsForDir(r.btc_dir)}">${fmtPct(r.btc_ret15)}</td>
+        <td class="text-right font-mono ${clsForDir(r.eth_dir)}">${fmtPct(r.eth_ret15)}</td>
+        <td class="text-right font-mono ${excessCls}">${excessText}</td>
+        <td class="text-center text-xs">${solBadge} / ${btcBadge} / ${ethBadge}</td>
+      </tr>
+    `;
+  }).join('');
 }
 
 // ==================== PRICE CHART ====================
@@ -1403,6 +1464,9 @@ async function loadDashboard() {
       el.className = 'equity-badge tip ' + clsFor(acc.total_pnl);
     }
   } catch (_) {}
+
+  // Next high (оновлюємо разом з дашбордом)
+  loadNextHigh();
 }
 
 // ==================== EVENTS ====================
@@ -1495,17 +1559,12 @@ async function loadImpact() {
     const rateCls = denom > 0 ? ((r.hits/denom) >= 0.6 ? 'up' : (r.hits/denom) <= 0.4 ? 'down' : 'flat') : 'flat';
 
     const rateTip = [
-      `HIT: ${r.hits||0}`,
-      `MISS: ${r.misses||0}`,
-      `NEUTRAL: ${r.neutrals||0}`,
-      `NO_DATA: ${r.no_data||0}`,
-      `N/A: ${r.na||0}`,
+      `HIT: ${r.hits||0}`, `MISS: ${r.misses||0}`,
+      `NEUTRAL: ${r.neutrals||0}`, `NO_DATA: ${r.no_data||0}`, `N/A: ${r.na||0}`,
     ].join(' · ');
 
     const dirTip = [
-      `Up: ${r.up_15m||0}`,
-      `Down: ${r.down_15m||0}`,
-      `Flat: ${r.flat_15m||0}`,
+      `Up: ${r.up_15m||0}`, `Down: ${r.down_15m||0}`, `Flat: ${r.flat_15m||0}`,
     ].join(' · ');
 
     return `
@@ -1888,7 +1947,7 @@ async function loadCrossAsset() {
       ${metric('Avg SOL +15хв', fmtPct(sum.avg_sol_ret_15m), clsFor(sum.avg_sol_ret_15m),
               'Середня зміна SOL через 15 хв після подій')}
       ${metric('Excess SOL vs BTC', fmtPct(sum.avg_excess_sol_vs_btc), clsFor(sum.avg_excess_sol_vs_btc),
-              'Різниця: SOL − BTC. Якщо близько 0 — новина не рухала SOL окремо від ринку.')}
+              'Різниця: SOL − BTC.')}
     </div>
   `;
 
@@ -2020,7 +2079,6 @@ document.addEventListener('DOMContentLoaded', () => {
   connect();
 })();
 
-
 // ==================== TOOLS ====================
 function showToolsResult(label, data) {
   const card = document.getElementById('tools-result-card');
@@ -2125,17 +2183,48 @@ async function toolDbStats() {
   }
 }
 
+async function toolDbTables() {
+  const container = document.getElementById('db-tables-result');
+  container.innerHTML = '<span class="loading"></span>';
+  try {
+    const data = await api('/tools/db_tables');
+    let html = `<div class="text-xs text-slate-400 mb-2">
+      📁 ${data.db_path}<br>
+      Загальний розмір: <b>${data.db_total_mb} МБ</b>
+    </div>`;
+    html += '<table class="text-xs"><thead><tr>';
+    html += '<th>Таблиця</th><th class="text-right">Рядків</th><th class="text-right">Розмір</th>';
+    html += '</tr></thead><tbody>';
+    for (const t of data.tables) {
+      html += `<tr>
+        <td class="font-mono">${t.table}</td>
+        <td class="text-right font-mono">${t.rows ?? '—'}</td>
+        <td class="text-right font-mono">${t.size_mb != null ? t.size_mb + ' МБ' : '—'}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<span class="text-red-400 text-xs">Помилка: ${e}</span>`;
+  }
+}
+
 async function toolLogs() {
   const lines = parseInt(document.getElementById('tool-logs-lines').value) || 100;
+  const grep = document.getElementById('tool-logs-grep').value.trim();
   try {
-    const r = await api(`/tools/logs?lines=${lines}`);
+    const params = new URLSearchParams({ lines: lines });
+    if (grep) params.set('grep', grep);
+    const r = await api(`/tools/logs?${params.toString()}`);
     if (r.error) {
       showToolsResult('📋 Логи (помилка)', r);
     } else {
       const card = document.getElementById('tools-result-card');
       const pre = document.getElementById('tools-result');
       card.style.display = '';
-      pre.textContent = r.lines.join('\n');
+      const timestamp = new Date().toLocaleString('uk-UA', { timeZone: LOCAL_TZ });
+      pre.textContent = `[${timestamp}] Логи (${r.count} рядків${grep ? `, grep="${grep}"` : ''})\n\n`
+                      + r.lines.join('\n');
     }
   } catch (e) {
     showToolsResult('❌ Помилка', { error: String(e) });
@@ -2152,7 +2241,7 @@ async function toolDiagnostics() {
 }
 
 async function toolClearImpact() {
-  if (!confirm('⚠️ Видалити всі записи з event_impact?\n\nЦе НЕ видалить події чи свічки. Після цього треба буде перерахувати impact.')) return;
+  if (!confirm('⚠️ Видалити всі записи з event_impact?')) return;
   if (!confirm('Точно впевнений? Друге підтвердження.')) return;
   try {
     const r = await api('/tools/clear_impact', { method: 'POST' });
@@ -2164,7 +2253,7 @@ async function toolClearImpact() {
 }
 
 async function toolResetPaper() {
-  if (!confirm('⚠️ Скинути paper акаунт?\n\nБаланс повернеться до $100, всі угоди видаляться.')) return;
+  if (!confirm('⚠️ Скинути paper акаунт? Баланс повернеться до $100.')) return;
   if (!confirm('Точно впевнений? Друге підтвердження.')) return;
   try {
     const r = await api('/paper/reset', { method: 'POST' });
@@ -2177,6 +2266,7 @@ async function toolResetPaper() {
 
 // ==================== INIT ====================
 loadDashboard();
+loadNextHigh();
 
 setInterval(() => {
   const active = document.querySelector('.tab.active');
@@ -2186,6 +2276,7 @@ setInterval(() => {
   if (active.dataset.tab === 'paper') loadPaper();
   if (active.dataset.tab === 'events') loadEvents();
   if (active.dataset.tab === 'calendar') loadCalendar();
+  if (active.dataset.tab === 'compare') loadCompare();
 }, 30000);
 
 setInterval(() => {
@@ -2199,6 +2290,9 @@ setInterval(async () => {
     for (const p of data) currentPrices[p.symbol] = p.close;
   } catch (_) {}
 }, 10000);
+
+// Next high — кожні 60 сек
+setInterval(loadNextHigh, 60000);
 </script>
 </body>
 </html>

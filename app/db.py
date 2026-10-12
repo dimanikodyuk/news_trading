@@ -70,8 +70,8 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     symbol TEXT NOT NULL,
-    direction TEXT NOT NULL,          -- 'long' | 'short'
-    entry_ts INTEGER NOT NULL,        -- ms
+    direction TEXT NOT NULL,
+    entry_ts INTEGER NOT NULL,
     entry_price REAL NOT NULL,
     entry_fee REAL NOT NULL,
     exit_ts INTEGER,
@@ -80,11 +80,18 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     size_usd REAL NOT NULL,
     pnl REAL,
     pnl_pct REAL,
-    status TEXT NOT NULL DEFAULT 'OPEN',   -- 'OPEN' | 'CLOSED'
-    reason TEXT,                      -- 'hit_rate>60' | 'manual'
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    reason TEXT,
     opened_at TEXT DEFAULT CURRENT_TIMESTAMP,
     closed_at TEXT,
-    UNIQUE(event_id, symbol)          -- одна угода на (подія, символ)
+    UNIQUE(event_id, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS event_reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(event_id)
 );
 """
 
@@ -100,6 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_impact_event ON event_impact(event_id);
 CREATE INDEX IF NOT EXISTS idx_impact_hit ON event_impact(hit);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_event ON paper_trades(event_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_event ON event_reminders(event_id);
 """
 
 
@@ -126,7 +134,6 @@ async def init_db():
         await db.executescript(INDEXES_SQL)
         await db.commit()
 
-        # Ініціалізуємо paper_account (один рядок)
         cur = await db.execute("SELECT COUNT(*) AS n FROM paper_account")
         if (await cur.fetchone())["n"] == 0:
             await db.execute(
