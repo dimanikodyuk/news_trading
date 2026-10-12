@@ -3,8 +3,7 @@
 
 ВАЖЛИВО: порядок правил критичний!
 `get_expected_direction` бере ПЕРШЕ правило, яке матчить title.
-Тому СПЕЦИФІЧНІ правила (ADP, AHE) мають бути ПЕРЕД загальними (non-farm).
-Інакше ADP буде матчитись правилом `non-farm`, а не своїм.
+Тому СПЕЦИФІЧНІ правила мають бути ПЕРЕД загальними.
 """
 
 import logging
@@ -52,8 +51,14 @@ RULES = [
      "higher": "up", "lower": "down"},
 
     # =====================================================================
-    # USD: інфляція
+    # USD: інфляція — ПЕРЕД GDP, бо GDP Price Index — це теж інфляція
     # =====================================================================
+
+    # --- GDP Price Index / Deflator (ціновий індекс, НЕ GDP!) ---
+    {"pattern": ["gdp price index", "gdp deflator"],
+     "higher": "down", "lower": "up"},
+
+    # --- CPI, PPI, PCE ---
     {"pattern": ["cpi m/m", "cpi y/y", "core cpi", "ppi m/m", "ppi y/y",
                  "core pce", "pce price index", "trimmed mean cpi",
                  "pce price index m/m", "core pce price index m/m",
@@ -61,7 +66,7 @@ RULES = [
      "higher": "down", "lower": "up"},
 
     # =====================================================================
-    # USD: GDP
+    # USD: GDP (загальне — ПІСЛЯ специфічних GDP Price Index)
     # =====================================================================
     {"pattern": ["gdp"],
      "higher": "up", "lower": "down"},
