@@ -16,9 +16,17 @@ RULES = [
      "higher": "down", "lower": "up"},
 
     # --- USD: зайнятість ---
-    {"pattern": ["non-farm", "nonfarm", "adp non-farm", "average hourly earnings",
+    {"pattern": ["non-farm", "nonfarm", "average hourly earnings",
                  "average earnings", "employment change"],
      "higher": "down", "lower": "up"},
+
+    # ADP Non-Farm: ВИЩЕ прогнозу → сильний ринок → risk-on → UP
+    {"pattern": ["adp non-farm", "adp employment"],
+     "higher": "up", "lower": "down"},  # ← БУЛО: higher: down
+
+    # JOLTS: ВИЩЕ = сильніший ринок → risk-on → UP
+    {"pattern": ["jolts"],
+     "higher": "up", "lower": "down"},  # ← БУЛО: higher: down
 
     # --- Unemployment Claims: більше заявок = dovish = up для SOL ---
     {"pattern": ["unemployment claims", "jobless claims", "initial claims"],
@@ -27,10 +35,6 @@ RULES = [
     # --- Challenger Job Cuts: більше скорочень = dovish = up ---
     {"pattern": ["challenger job cuts"],
      "higher": "up", "lower": "down"},
-
-    # --- JOLTS: більше вакансій = сильніший ринок = hawkish = down ---
-    {"pattern": ["jolts"],
-     "higher": "down", "lower": "up"},
 
     # --- GDP ---
     {"pattern": ["gdp"],
