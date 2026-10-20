@@ -598,6 +598,24 @@
     <!-- Параметри -->
     <div class="card p-4 mb-6">
       <h2 class="section-title">⚙ Параметри прогону</h2>
+
+      <div class="mb-3">
+        <label class="text-xs text-slate-400">Шаблон</label>
+        <select id="bt-preset" onchange="applyBacktestPreset(this.value)"
+                class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+          <option value="default">Default (60% / 0.30% / T+60 / LONG-only)</option>
+          <option value="all">All signals (0% / 0% / T+60 / LONG+SHORT)</option>
+          <option value="long_only">LONG-only (60% / 0.30% / T+60)</option>
+          <option value="short_only">SHORT-only (60% / 0.30% / T+60)</option>
+          <option value="fast_exit">Fast exit (60% / 0.30% / T+15)</option>
+          <option value="mid_exit">Mid exit (60% / 0.30% / T+30)</option>
+          <option value="slow_exit">Slow exit (60% / 0.30% / T+120)</option>
+          <option value="strict">Strict (80% / 0.50% / T+60)</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div class="hint" id="bt-preset-hint"></div>
+      </div>
+
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <label class="text-xs text-slate-400">Днів назад (порожнє = всі)</label>
@@ -683,6 +701,21 @@
           <th class="text-right">P&L</th>
         </tr></thead>
         <tbody id="bt-by-symbol-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- По напрямках -->
+    <div class="card p-4 mb-6" id="bt-by-direction-card" style="display:none">
+      <h2 class="section-title">📊 По напрямках</h2>
+      <table>
+        <thead><tr>
+          <th>Напрямок</th>
+          <th class="text-right">Угод</th>
+          <th class="text-right">Wins</th>
+          <th class="text-right">Win Rate</th>
+          <th class="text-right">P&L</th>
+        </tr></thead>
+        <tbody id="bt-by-direction-tbody"></tbody>
       </table>
     </div>
 
@@ -2228,6 +2261,123 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ==================== BACKTEST ====================
 let btEquityChart = null;
+// ==================== BACKTEST PRESETS ====================
+const BT_PRESETS = {
+  default: {
+    label: 'Default',
+    hit_rate: 60, min_move: 0.30, min_events: 1,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: true,
+    exit_offset: 60, size_usd: 10,
+    hint: 'Базовий прогін: high-only, HIT/MISS, hit_rate≥60%, |ret|≥0.3%, T+60, тільки LONG.',
+  },
+  all: {
+    label: 'All signals',
+    hit_rate: 0, min_move: 0, min_events: 1,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: false,
+    exit_offset: 60, size_usd: 10,
+    hint: 'Без фільтрів: усі сигнали, LONG+SHORT. Показує максимум можливих угод.',
+  },
+  long_only: {
+    label: 'LONG-only',
+    hit_rate: 60, min_move: 0.30, min_events: 1,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: true,
+    exit_offset: 60, size_usd: 10,
+    hint: 'Тільки LONG. Для SPOT-акаунту без ф’ючерсів.',
+  },
+  short_only: {
+    label: 'SHORT-only (потребує LONG+SHORT)',
+    hit_rate: 60, min_move: 0.30, min_events: 1,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: false,  // ← увімкнути SHORT
+    exit_offset: 60, size_usd: 10,
+    hint: 'Усі сигнали з expected_dir=down. SPOT-LONG-only OFF, бо інакше SHORT заблоковано.',
+  },
+  fast_exit: {
+    label: 'Fast exit T+15',
+    hit_rate: 60, min_move: 0.30, min_events: 1,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: false,
+    exit_offset: 15, size_usd: 10,
+    hint: 'Вихід через 15 хв. Менше шуму, але менший прибуток на угоду.',
+  },
+  mid_exit: {
+    label: 'Mid exit T+30',
+    hit_rate: 60, min_move: 0.30, min_events: 1,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: false,
+    exit_offset: 30, size_usd: 10,
+    hint: 'Вихід через 30 хв. Компроміс між шумом і прибутком.',
+  },
+  slow_exit: {
+    label: 'Slow exit T+120',
+    hit_rate: 60, min_move: 0.30, min_events: 1,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: false,
+    exit_offset: 120, size_usd: 10,
+    hint: 'Вихід через 2 год. Більше часу на розворот — ризик втратити імпульс.',
+  },
+  strict: {
+    label: 'Strict',
+    hit_rate: 80, min_move: 0.50, min_events: 2,
+    symbols: 'SOLUSDT,BTCUSDT', spot_long_only: false,
+    exit_offset: 60, size_usd: 10,
+    hint: 'Строгі фільтри: hit_rate≥80%, |ret|≥0.5%, min_events≥2. Мало угод, але якісніші.',
+  },
+  custom: {
+    label: 'Custom',
+    hint: 'Ручні параметри. Змінюй поля нижче.',
+  },
+};
+
+function applyBacktestPreset(name) {
+  const p = BT_PRESETS[name];
+  if (!p) return;
+
+  const hintEl = document.getElementById('bt-preset-hint');
+  if (hintEl) hintEl.textContent = p.hint || '';
+
+  if (name === 'custom') return;
+
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v;
+  };
+  const setChk = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.checked = v;
+  };
+
+  setVal('bt-hit-rate', p.hit_rate);
+  setVal('bt-min-move', p.min_move);
+  setVal('bt-min-events', p.min_events);
+  setVal('bt-symbols', p.symbols);
+  setChk('bt-long-only', p.spot_long_only);
+  setVal('bt-exit-offset', p.exit_offset);
+  setVal('bt-size-usd', p.size_usd);
+}
+
+// Автоперемикання на Custom при ручній зміні будь-якого поля
+document.addEventListener('DOMContentLoaded', () => {
+  ['bt-hit-rate', 'bt-min-move', 'bt-min-events', 'bt-symbols',
+   'bt-long-only', 'bt-exit-offset', 'bt-size-usd'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const evt = el.type === 'checkbox' ? 'change' : 'input';
+    el.addEventListener(evt, () => {
+      const sel = document.getElementById('bt-preset');
+      if (sel && sel.value !== 'custom') {
+        sel.value = 'custom';
+        const hintEl = document.getElementById('bt-preset-hint');
+        if (hintEl) {
+          const p = BT_PRESETS.custom;
+          hintEl.textContent = p ? (p.hint || '') : '';
+        }
+      }
+    });
+  });
+});
+
+// Ініціалізація: застосувати default при завантаженні
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('bt-preset');
+  if (sel) applyBacktestPreset(sel.value);
+});
 
 async function runBacktest() {
   const btn = document.getElementById('bt-run-btn');
@@ -2329,6 +2479,22 @@ function renderBacktestResult(r) {
   } else {
     document.getElementById('bt-by-symbol-card').style.display = 'none';
   }
+
+  // По напрямках
+  if (r.by_direction && r.by_direction.length > 0) {
+    document.getElementById('bt-by-direction-card').style.display = '';
+    document.getElementById('bt-by-direction-tbody').innerHTML = r.by_direction.map(x => `
+      <tr>
+        <td>${dirBadge(x.direction)}</td>
+        <td class="text-right font-mono">${x.n}</td>
+        <td class="text-right font-mono up">${x.wins}</td>
+        <td class="text-right font-mono ${x.win_rate >= 50 ? 'up' : 'down'}">${x.win_rate.toFixed(1)}%</td>
+        <td class="text-right font-mono ${clsFor(x.total_pnl)}">${fmtUsd(x.total_pnl)}</td>
+      </tr>
+    `).join('');
+  } else {
+    document.getElementById('bt-by-direction-card').style.display = 'none';
+  }
 }
 
 async function loadBacktestTrades() {
@@ -2415,6 +2581,7 @@ async function clearBacktest() {
   document.getElementById('bt-summary-card').style.display = 'none';
   document.getElementById('bt-skips-card').style.display = 'none';
   document.getElementById('bt-by-symbol-card').style.display = 'none';
+  document.getElementById('bt-by-direction-card').style.display = 'none';
   document.getElementById('bt-equity-card').style.display = 'none';
   document.getElementById('bt-trades-card').style.display = 'none';
   if (btEquityChart) { btEquityChart.destroy(); btEquityChart = null; }

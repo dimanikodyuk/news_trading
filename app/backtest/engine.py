@@ -3,12 +3,13 @@ Backtest paper engine на історичних подіях.
 
 Не чіпає paper_account / paper_trades — пише у backtest_trades.
 
-FIX:
-- Дедуплікація по (event_time_utc, symbol), а не (event_id, symbol).
-  Це виправляє дублювання угод для подій в один timestamp
-  (напр. Core PCE + Final GDP о 12:30 → одна угода на символ, не дві).
-- Додано skip_reason "duplicate_ts_symbol" для прозорості.
-- Логування кожного skip на debug-рівні.
+FIX (v2):
+- Дедуплікація по (event_time_utc, symbol, direction), а не (event_time_utc, symbol).
+  Це дозволяє мати різні угоди для подій в один timestamp, якщо в них
+  різний expected_dir (напр. PPI=down→short, Retail Sales=up→long).
+- Однакові напрямки в кластері все ще дедуплікуються (щоб не було
+  3 однакових SHORT-угод на одному символі).
+- Логування кожного skip на debug-рівні з деталями.
 """
 
 import logging
@@ -146,17 +147,6 @@ async def run_backtest(
                 continue
 
             for sym in syms:
-                # FIX: дедуплікація по (event_time_utc, symbol), не по event_id.
-                # Це критично для подій в один timestamp (Core PCE + Final GDP).
-                cur = await db.execute("""
-                    SELECT 1 FROM backtest_trades
-                    WHERE event_time_utc = ? AND symbol = ?
-                """, (c["time_utc"], sym))
-                if await cur.fetchone():
-                    _skip("duplicate_ts_symbol",
-                          f"{c['time_utc']} {sym} (вже є угода на цей timestamp)")
-                    continue
-
                 cur = await db.execute("""
                     SELECT expected_dir, hit, price_t1, ret_15m
                     FROM event_impact
@@ -180,6 +170,18 @@ async def run_backtest(
                 if spot_long_only and direction == "short":
                     _skip("spot_long_only",
                           f"{c['title']} {sym} dir={direction}")
+                    continue
+
+                # FIX v2: дедуплікація по (event_time_utc, symbol, direction).
+                # Дозволяє різні напрямки в одному кластері,
+                # але не дублює однакові.
+                cur = await db.execute("""
+                    SELECT 1 FROM backtest_trades
+                    WHERE event_time_utc = ? AND symbol = ? AND direction = ?
+                """, (c["time_utc"], sym, direction))
+                if await cur.fetchone():
+                    _skip("duplicate_ts_symbol_direction",
+                          f"{c['time_utc']} {sym} {direction} (вже є)")
                     continue
 
                 entry_ts = event_ts + ENTRY_OFFSET_MIN * 60_000
@@ -259,6 +261,15 @@ async def run_backtest(
         """)
         by_sym = [dict(r) for r in await cur.fetchall()]
 
+        # FIX v2: розбивка по direction
+        cur = await db.execute("""
+            SELECT direction, COUNT(*) AS n,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(pnl) AS total_pnl
+            FROM backtest_trades GROUP BY direction
+        """)
+        by_direction = [dict(r) for r in await cur.fetchall()]
+
     n = s["n"] or 0
     wins = s["wins"] or 0
     losses = s["losses"] or 0
@@ -299,6 +310,16 @@ async def run_backtest(
             }
             for r in by_sym
         ],
+        "by_direction": [
+            {
+                "direction": r["direction"],
+                "n": r["n"] or 0,
+                "wins": r["wins"] or 0,
+                "win_rate": round((r["wins"] or 0) / r["n"] * 100, 1) if r["n"] else 0,
+                "total_pnl": round(r["total_pnl"] or 0, 4),
+            }
+            for r in by_direction
+        ],
     }
 
 
@@ -306,7 +327,7 @@ async def get_backtest_trades(limit: int = 500) -> list[dict]:
     async with get_db() as db:
         cur = await db.execute("""
             SELECT * FROM backtest_trades
-            ORDER BY event_time_utc DESC, symbol ASC
+            ORDER BY event_time_utc DESC, symbol ASC, direction ASC
             LIMIT ?
         """, (limit,))
         return [dict(r) for r in await cur.fetchall()]

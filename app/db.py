@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS paper_account (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE backtest_trades (
+CREATE TABLE IF NOT EXISTS backtest_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL,
     event_title TEXT,
@@ -85,9 +85,8 @@ CREATE TABLE backtest_trades (
     status TEXT NOT NULL DEFAULT 'CLOSED',
     reason TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(event_time_utc, symbol)
+    UNIQUE(event_time_utc, symbol, direction)
 );
-
 
 CREATE TABLE IF NOT EXISTS paper_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,6 +148,67 @@ async def get_db():
         await db.close()
 
 
+async def _table_sql(db: aiosqlite.Connection, table: str) -> str | None:
+    """Повертає SQL створення таблиці або None, якщо її немає."""
+    cur = await db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?",
+        (table,),
+    )
+    row = await cur.fetchone()
+    return row["sql"] if row else None
+
+
+async def _migrate_backtest_trades(db: aiosqlite.Connection):
+    """
+    FIX: якщо backtest_trades існує зі старою схемою (UNIQUE(event_id, symbol)
+    або UNIQUE(event_time_utc, symbol)), пересоздаємо її з новою
+    UNIQUE(event_time_utc, symbol, direction).
+    Дані backtest не критичні — їх можна перерахувати.
+    """
+    sql = await _table_sql(db, "backtest_trades")
+    if sql is None:
+        return
+
+    needs_recreate = (
+        "UNIQUE(event_time_utc, symbol, direction)" not in sql
+    )
+    if not needs_recreate:
+        return
+
+    logger.warning(
+        "backtest_trades має стару схему — пересоздаю з "
+        "UNIQUE(event_time_utc, symbol, direction)"
+    )
+    await db.execute("DROP TABLE IF EXISTS backtest_trades")
+    await db.commit()
+
+    await db.execute("""
+        CREATE TABLE backtest_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id INTEGER NOT NULL,
+            event_title TEXT,
+            event_time_utc TEXT,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            entry_ts INTEGER NOT NULL,
+            entry_price REAL NOT NULL,
+            entry_fee REAL NOT NULL,
+            exit_ts INTEGER,
+            exit_price REAL,
+            exit_fee REAL,
+            size_usd REAL NOT NULL,
+            pnl REAL,
+            pnl_pct REAL,
+            status TEXT NOT NULL DEFAULT 'CLOSED',
+            reason TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(event_time_utc, symbol, direction)
+        )
+    """)
+    await db.commit()
+    logger.info("backtest_trades пересоздано з новою схемою")
+
+
 async def init_db():
     _ensure_db_dir()
     async with get_db() as db:
@@ -157,6 +217,9 @@ async def init_db():
 
         for table, col, coltype in MIGRATIONS:
             await _add_column_if_missing(db, table, col, coltype)
+
+        # FIX: міграція backtest_trades на нову UNIQUE
+        await _migrate_backtest_trades(db)
 
         await db.executescript(INDEXES_SQL)
         await db.commit()
