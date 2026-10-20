@@ -4,6 +4,18 @@ Paper Trading Engine: відкриття та закриття віртуаль�
 Режим: LONG + SHORT (симуляція).
 Символи: SOLUSDT + BTCUSDT.
 Фільтр руху: PAPER_MIN_MOVE_PCT — не торгуємо, якщо |ret_15m| < 0.30%.
+
+FIX:
+- Прибрано жорстку вимогу price_t60 IS NOT NULL з candidates
+  (достатньо price_t1; T+60 дорахується при закритті).
+- Розширено вікно входу: T+1 .. T+30 (замість T+1 .. T+60),
+  щоб engine (кожні 5 хв) встигав побачити подію.
+- Hit rate рахується по нормалізованій назві (lower, strip),
+  а не по точному title.
+- Додано детальне діагностичне логування причин skip.
+- ORDER BY e.time_utc DESC LIMIT 50 (більше кандидатів).
+- MAX_OPEN_TRADES лишається 6, але перевірка коректна.
+- SPOT_LONG_ONLY = True (SPOT не має short).
 """
 
 import logging
@@ -28,13 +40,14 @@ MIN_EVENTS_FOR_TRUST = 1    # ТЕСТ: 1 (для продакшену — 5)
 MAX_OPEN_TRADES = 6         # 3 на символ × 2 символи
 
 # --- Мінімальний рух для торгівлі ---
-# Якщо |ret_15m| < цього значення — пропускаємо (немає сенсу, комісії з'їдять)
 PAPER_MIN_MOVE_PCT = 0.30
 
+# --- Вікно входу після події (FIX: було T+60) ---
+ENTRY_WINDOW_MIN = 30       # вхід дозволено в межах T+1 .. T+30
+EXIT_AFTER_MIN = 60         # вихід на T+60
+
 # --- Режим торгівлі ---
-# True  → тільки LONG (SPOT)
-# False → LONG + SHORT (симуляція, для майбутніх ф'ючерсів)
-SPOT_LONG_ONLY = False
+SPOT_LONG_ONLY = True       # FIX: SPOT не має short
 
 
 async def process_paper_engine() -> dict:
@@ -69,7 +82,7 @@ async def _close_expired_trades(db) -> int:
         if event_ts_ms is None:
             continue
 
-        exit_ts = event_ts_ms + 60 * 60_000
+        exit_ts = event_ts_ms + EXIT_AFTER_MIN * 60_000
         if now_ms < exit_ts:
             continue
 
@@ -81,7 +94,7 @@ async def _close_expired_trades(db) -> int:
         """, (t["symbol"], exit_ts - 2 * 60_000, exit_ts + 2 * 60_000, exit_ts))
         row = await cur.fetchone()
         if not row:
-            logger.warning(f"[trade {t['id']}] немає свічки на T+60")
+            logger.warning(f"[trade {t['id']}] немає свічки на T+{EXIT_AFTER_MIN}")
             continue
 
         exit_price = float(row["close"])
@@ -152,15 +165,22 @@ async def _close_trade(db, trade, exit_price: float, exit_ts: int):
 # Відкриття
 # ---------------------------------------------------------------------------
 
+def _norm_title(title: str) -> str:
+    """FIX: нормалізована назва для групування hit rate."""
+    return (title or "").strip().lower()
+
+
 async def _open_new_trades(db) -> int:
     cur = await db.execute("SELECT COUNT(*) AS n FROM paper_trades WHERE status='OPEN'")
     open_count = (await cur.fetchone())["n"]
     if open_count >= MAX_OPEN_TRADES:
+        logger.debug(f"[paper] skip: open_count={open_count} >= {MAX_OPEN_TRADES}")
         return 0
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    # Знаходимо події, які ще не мають угод по ЖОДНОМУ символу
+    # FIX: прибрано price_t60 IS NOT NULL; достатньо price_t1 і ret_15m.
+    # FIX: LIMIT 50 замість 20.
     cur = await db.execute("""
         SELECT
             e.id AS event_id, e.title, e.importance, e.time_utc
@@ -169,22 +189,22 @@ async def _open_new_trades(db) -> int:
           AND EXISTS (
               SELECT 1 FROM event_impact ei
               WHERE ei.event_id = e.id
+                AND ei.symbol IN ('SOLUSDT', 'BTCUSDT')
                 AND ei.expected_dir IS NOT NULL
                 AND ei.hit IN ('HIT', 'MISS')
                 AND ei.price_t1 IS NOT NULL
-                AND ei.price_t60 IS NOT NULL
+                AND ei.ret_15m IS NOT NULL
           )
           AND (
               SELECT COUNT(*) FROM paper_trades pt
               WHERE pt.event_id = e.id
           ) < ?
         ORDER BY e.time_utc DESC
-        LIMIT 20
+        LIMIT 50
     """, (len(TRADE_SYMBOLS),))
     candidates = await cur.fetchall()
 
-    if candidates:
-        logger.info(f"[paper] Знайдено {len(candidates)} подій-кандидатів")
+    logger.info(f"[paper] candidates: {len(candidates)} (open_count={open_count})")
 
     opened = 0
     for c in candidates:
@@ -194,35 +214,52 @@ async def _open_new_trades(db) -> int:
         # Таймінг
         event_ts = _iso_to_ms(c["time_utc"])
         if event_ts is None:
-            continue
-        entry_ts = event_ts + 60_000
-        exit_ts = event_ts + 60 * 60_000
-        if now_ms < entry_ts:
-            logger.info(f"[paper] {c['title']}: ще не час (entry_ts у майбутньому)")
-            continue
-        if now_ms > exit_ts:
-            logger.info(f"[paper] {c['title']}: вікно минуло")
+            logger.debug(f"[paper] skip '{c['title']}': bad time_utc")
             continue
 
-        # Hit rate по title (на основі SOL)
+        entry_min_ts = event_ts + 60_000
+        entry_max_ts = event_ts + ENTRY_WINDOW_MIN * 60_000
+
+        if now_ms < entry_min_ts:
+            logger.debug(
+                f"[paper] skip '{c['title']}': ще не час "
+                f"(now={now_ms}, entry_min={entry_min_ts})"
+            )
+            continue
+        if now_ms > entry_max_ts:
+            logger.debug(
+                f"[paper] skip '{c['title']}': вікно входу минуло "
+                f"(now={now_ms}, entry_max={entry_max_ts})"
+            )
+            continue
+
+        # FIX: hit rate по нормалізованій назві
+        norm_title = _norm_title(c["title"])
         cur = await db.execute("""
             SELECT
-                SUM(CASE WHEN hit='HIT' THEN 1 ELSE 0 END) AS hits,
-                SUM(CASE WHEN hit='MISS' THEN 1 ELSE 0 END) AS misses
-            FROM event_impact
-            WHERE symbol = 'SOLUSDT'
-              AND event_id IN (SELECT id FROM events WHERE title = ?)
-        """, (c["title"],))
+                SUM(CASE WHEN ei.hit='HIT' THEN 1 ELSE 0 END) AS hits,
+                SUM(CASE WHEN ei.hit='MISS' THEN 1 ELSE 0 END) AS misses
+            FROM event_impact ei
+            JOIN events e ON e.id = ei.event_id
+            WHERE ei.symbol = 'SOLUSDT'
+              AND LOWER(TRIM(e.title)) = ?
+        """, (norm_title,))
         hr = await cur.fetchone()
         hits = hr["hits"] or 0
         misses = hr["misses"] or 0
         total = hits + misses
+
         if total < MIN_EVENTS_FOR_TRUST:
-            logger.info(f"[paper] {c['title']}: n={total} < {MIN_EVENTS_FOR_TRUST}")
+            logger.info(
+                f"[paper] skip '{c['title']}': hit_rate n={total} < {MIN_EVENTS_FOR_TRUST}"
+            )
             continue
+
         hit_rate = (hits / total * 100) if total > 0 else 0
         if hit_rate < HIT_RATE_THRESHOLD:
-            logger.info(f"[paper] {c['title']}: hit_rate={hit_rate:.0f}% < {HIT_RATE_THRESHOLD}%")
+            logger.info(
+                f"[paper] skip '{c['title']}': hit_rate={hit_rate:.0f}% < {HIT_RATE_THRESHOLD}%"
+            )
             continue
 
         # Для КОЖНОГО символу окремо
@@ -230,7 +267,6 @@ async def _open_new_trades(db) -> int:
             if open_count + opened >= MAX_OPEN_TRADES:
                 break
 
-            # Чи вже є угода для цього (event, symbol)?
             cur = await db.execute("""
                 SELECT 1 FROM paper_trades
                 WHERE event_id = ? AND symbol = ?
@@ -238,7 +274,6 @@ async def _open_new_trades(db) -> int:
             if await cur.fetchone():
                 continue
 
-            # Impact для цього символу
             cur = await db.execute("""
                 SELECT expected_dir, hit, price_t1, ret_15m
                 FROM event_impact
@@ -249,20 +284,22 @@ async def _open_new_trades(db) -> int:
             """, (c["event_id"], sym))
             row = await cur.fetchone()
             if not row:
+                logger.debug(f"[paper] skip {sym} '{c['title']}': немає impact row")
                 continue
 
-            # === ПЕРЕВІРКА МІНІМАЛЬНОГО РУХУ ===
             ret_15 = row["ret_15m"]
             if ret_15 is None or abs(ret_15) < PAPER_MIN_MOVE_PCT:
-                logger.debug(
+                logger.info(
                     f"[paper] skip {sym} '{c['title']}': "
-                    f"|ret_15m| = {abs(ret_15 or 0):.3f}% < {PAPER_MIN_MOVE_PCT}%"
+                    f"|ret_15m|={abs(ret_15 or 0):.3f}% < {PAPER_MIN_MOVE_PCT}%"
                 )
                 continue
 
             direction = "long" if row["expected_dir"] == "up" else "short"
             if SPOT_LONG_ONLY and direction == "short":
-                logger.debug(f"[paper] skip {sym}: SHORT заблоковано (SPOT_LONG_ONLY)")
+                logger.info(
+                    f"[paper] skip {sym} '{c['title']}': SHORT заблоковано (SPOT_LONG_ONLY)"
+                )
                 continue
 
             entry_price = float(row["price_t1"])

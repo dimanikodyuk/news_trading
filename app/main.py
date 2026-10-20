@@ -160,7 +160,12 @@ async def recompute_impact_job():
                 LEFT JOIN event_impact ei ON ei.event_id = e.id
                 WHERE e.time_utc < datetime('now')
                   AND e.importance IN ('high', 'medium')
-                  AND (ei.id IS NULL OR ei.hit IS NULL)
+                  AND (
+                        ei.id IS NULL
+                     OR ei.hit IS NULL
+                     OR ei.price_t1 IS NULL
+                     OR ei.price_t60 IS NULL
+                  )
                 ORDER BY e.time_utc DESC
                 LIMIT 50
             """)
@@ -267,7 +272,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(recompute_impact_job, "interval",
                       minutes=30, id="impact_recompute_auto")
     scheduler.add_job(paper_engine_job, "interval",
-                      minutes=5, id="paper_engine")
+                      minutes=1, id="paper_engine") # FIX: було 5
     scheduler.add_job(check_upcoming_events, "interval",
                       minutes=1, id="check_upcoming")
     scheduler.add_job(weekly_report_job, CronTrigger(day_of_week="sun", hour=20, minute=0),
@@ -296,6 +301,75 @@ STATIC_DIR.mkdir(exist_ok=True)
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+@app.get("/tools/paper_diagnostics")
+async def tools_paper_diagnostics():
+    """FIX: діагностика, чому paper engine не відкриває угоди."""
+    now = datetime.now(timezone.utc)
+    now_ms = int(now.timestamp() * 1000)
+
+    async with get_db() as db:
+        # Скільки impact мають price_t1 / price_t60
+        cur = await db.execute("""
+            SELECT symbol,
+                   COUNT(*) AS n,
+                   SUM(CASE WHEN price_t1 IS NOT NULL THEN 1 ELSE 0 END) AS has_t1,
+                   SUM(CASE WHEN price_t60 IS NOT NULL THEN 1 ELSE 0 END) AS has_t60,
+                   SUM(CASE WHEN price_t1 IS NOT NULL AND price_t60 IS NOT NULL THEN 1 ELSE 0 END) AS has_both
+            FROM event_impact GROUP BY symbol
+        """)
+        impact_by_symbol = [dict(r) for r in await cur.fetchall()]
+
+        # Скільки подій проходять candidates-фільтр
+        cur = await db.execute("""
+            SELECT COUNT(*) AS n FROM events e
+            WHERE e.importance='high'
+              AND EXISTS (
+                  SELECT 1 FROM event_impact ei
+                  WHERE ei.event_id=e.id
+                    AND ei.expected_dir IS NOT NULL
+                    AND ei.hit IN ('HIT','MISS')
+                    AND ei.price_t1 IS NOT NULL
+                    AND ei.ret_15m IS NOT NULL
+              )
+        """)
+        candidates_total = (await cur.fetchone())["n"]
+
+        # Кандидати у вікні входу зараз
+        cur = await db.execute("""
+            SELECT e.id, e.title, e.time_utc, e.importance
+            FROM events e
+            WHERE e.importance='high'
+              AND EXISTS (
+                  SELECT 1 FROM event_impact ei
+                  WHERE ei.event_id=e.id
+                    AND ei.expected_dir IS NOT NULL
+                    AND ei.hit IN ('HIT','MISS')
+                    AND ei.price_t1 IS NOT NULL
+                    AND ei.ret_15m IS NOT NULL
+              )
+            ORDER BY e.time_utc DESC
+            LIMIT 50
+        """)
+        candidates = [dict(r) for r in await cur.fetchall()]
+
+    in_window = []
+    for c in candidates:
+        ts = _iso_to_ms(c["time_utc"])
+        if ts is None:
+            continue
+        entry_min = ts + 60_000
+        entry_max = ts + 30 * 60_000  # ENTRY_WINDOW_MIN
+        if entry_min <= now_ms <= entry_max:
+            in_window.append(c)
+
+    return {
+        "now_utc": now.isoformat(),
+        "impact_by_symbol": impact_by_symbol,
+        "candidates_total": candidates_total,
+        "candidates_in_entry_window": in_window,
+        "entry_window_min": 30,
+    }
 
 
 # ============================================================================

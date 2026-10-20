@@ -703,6 +703,14 @@
           <div class="hint mb-2">Розбивка impact по hit і importance.</div>
           <button onclick="toolDiagnostics()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
         </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">💰 Діагностика paper</div>
+          <div class="hint mb-2">Чому engine не відкриває угоди: price_t1/t60, candidates, вікно входу.</div>
+          <button onclick="toolPaperDiagnostics()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        </div>
+
+
         <div class="bg-slate-800/50 p-3 rounded border border-slate-700 md:col-span-2">
           <div class="font-semibold mb-1">📤 Експорт CSV</div>
           <div class="hint mb-2">Завантажити події або угоди у CSV.</div>
@@ -1468,6 +1476,16 @@ async function loadDashboard() {
   // Next high (оновлюємо разом з дашбордом)
   loadNextHigh();
 }
+
+async function toolPaperDiagnostics() {
+  try {
+    const r = await api('/tools/paper_diagnostics');
+    showToolsResult('💰 Діагностика paper', r);
+  } catch (e) {
+    showToolsResult('❌ Помилка', { error: String(e) });
+  }
+}
+
 
 // ==================== EVENTS ====================
 function debouncedLoadEvents() {

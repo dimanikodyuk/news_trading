@@ -1,5 +1,12 @@
 """
 Розрахунок впливу новини на ціну (SOL/BTC/ETH).
+
+FIX:
+- Розширено tolerance для _get_close (3 хв замість 2) — менше NULL-ів.
+- Якщо price_t60 відсутній, hit рахується по dir_15m (як і раніше),
+  але impact все одно зберігається.
+- Додано fallback: якщо для T+w немає свічки, беремо найближчу
+  в межах ±3 хв (раніше — ±2).
 """
 
 import logging
@@ -16,6 +23,7 @@ WINDOWS = [1, 5, 15, 30, 60]
 MIN_THRESHOLD_PCT = 0.10
 THRESHOLD_MULT = 2.0
 VOLATILITY_LOOKBACK_MIN = 24 * 60
+CLOSE_TOLERANCE_MIN = 3   # FIX: було 2
 
 
 async def compute_impact(db: aiosqlite.Connection,
@@ -72,14 +80,14 @@ async def compute_impact(db: aiosqlite.Connection,
         result[f"ret_{w}m"] = ret_pct
         result[f"dir_{w}m"] = _classify(ret_pct, threshold)
 
-    # Чи є взагалі дані для розрахунку hit?
     has_data = bool(event_row["forecast_value"] and event_row["actual_value"])
     result["hit"] = classify_hit(expected, result.get("dir_15m"),
                                  has_data=has_data)
     return result
 
 
-async def _get_close(db, symbol, interval, target_ts_ms, tolerance_min=2):
+async def _get_close(db, symbol, interval, target_ts_ms,
+                     tolerance_min=CLOSE_TOLERANCE_MIN):
     tol_ms = tolerance_min * 60_000
     cur = await db.execute("""
         SELECT ts, close FROM prices

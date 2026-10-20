@@ -5,6 +5,12 @@ WebSocket Bybit: kline-стрім для SOL/BTC/ETH.
 - Reconnect при розриві з'єднання (Bybit рве кожні 24 год)
 - Health-check кожні 60 сек
 - Якщо немає нових свічок > 3 хв — перепідключення
+
+FIX:
+- Перед реконектом закриваємо старі WS-інстанси (ws.exit()) — memory leak.
+- _last_save_ts скидається при реконекті, щоб health-check не спрацьовував
+  одразу після підключення.
+- _ws_instances очищається.
 """
 
 import logging
@@ -82,6 +88,19 @@ def _connect_once():
         return None
 
 
+def _cleanup_ws():
+    """FIX: закриваємо всі старі WS-інстанси перед реконектом."""
+    global _ws_instances
+    for ws in _ws_instances:
+        try:
+            ws.exit()
+        except Exception as ex:
+            logger.debug(f"[WS] exit failed: {ex}")
+    _ws_instances = []
+    # FIX: скидаємо last_save_ts, щоб health-check не спрацював одразу
+    _last_save_ts.clear()
+
+
 def start_ws_thread() -> threading.Thread:
     """Запускає WebSocket з автоматичним reconnect у фоновому потоці."""
 
@@ -117,10 +136,11 @@ def start_ws_thread() -> threading.Thread:
                 logger.exception(f"[WS] Помилка в циклі: {ex}")
                 time.sleep(10)
 
-            # Cleanup перед реконектом
+            # FIX: cleanup перед реконектом
+            _cleanup_ws()
             time.sleep(5)
 
-        logger.info("[WS] Потік зупинено")
+        logger.info("[WS] Поток зупинено")
 
     t = threading.Thread(target=_runner, daemon=True, name="bybit-ws")
     t.start()

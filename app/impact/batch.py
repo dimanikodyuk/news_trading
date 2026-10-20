@@ -1,5 +1,8 @@
 """
 Пакетний розрахунок impact для всіх минулих подій × всіх символів.
+
+FIX: якщо event_impact вже існує і має price_t60 — не перезаписуємо без потреби.
+FIX: логуємо, скільки подій мають неповні дані (price_t1/t60 = NULL).
 """
 
 import logging
@@ -16,23 +19,18 @@ SYMBOLS = ["SOLUSDT", "BTCUSDT", "ETHUSDT"]
 async def process_all_past_events(limit: int = 500) -> dict:
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    stats = {"processed": 0, "saved": 0, "skipped": 0, "errors": 0}
+    stats = {"processed": 0, "saved": 0, "skipped": 0, "errors": 0,
+             "incomplete": 0}
 
     async with get_db() as db:
-        # Перераховуємо події, якщо:
-        #   1) немає жодного impact з повними даними (< 3 записи)
-        #   2) hit = 'NO_DATA' або 'N/A', але тепер є actual_value
-        #      (правило могло додатись або actual з'явився пізніше)
         cur = await db.execute("""
             SELECT e.* FROM events e
             WHERE e.time_utc < ?
               AND e.importance IN ('high', 'medium')
               AND (
-                -- Немає жодного impact з повними даними
                 (SELECT COUNT(*) FROM event_impact ei
                  WHERE ei.event_id = e.id AND ei.ret_60m IS NOT NULL) < 3
                 OR
-                -- Або hit = NO_DATA/N/A, але тепер є actual → треба перерахувати
                 EXISTS (
                     SELECT 1 FROM event_impact ei
                     WHERE ei.event_id = e.id
@@ -82,6 +80,15 @@ async def process_all_past_events(limit: int = 500) -> dict:
                         impact["threshold_pct"],
                     ))
                     any_saved = True
+
+                    # FIX: діагностика неповних даних
+                    if impact.get("price_t1") is None or impact.get("price_t60") is None:
+                        stats["incomplete"] += 1
+                        logger.debug(
+                            f"[event {ev['id']} {sym}] incomplete: "
+                            f"price_t1={impact.get('price_t1')}, "
+                            f"price_t60={impact.get('price_t60')}"
+                        )
 
                 if any_saved:
                     stats["saved"] += 1

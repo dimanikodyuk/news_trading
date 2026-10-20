@@ -6,7 +6,9 @@ from app.bot.handlers import router
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print(repr(settings.tg_bot_token))
+    # FIX: прибрано print(repr(settings.tg_bot_token)) — токен не має потрапляти в логи
+    if not settings.tg_bot_token:
+        raise RuntimeError("TG_BOT_TOKEN не задано в .env")
     bot = Bot(token=settings.tg_bot_token)
     dp = Dispatcher()
     dp.include_router(router)
