@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS paper_account (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS backtest_trades (
+CREATE TABLE backtest_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL,
     event_title TEXT,
@@ -85,8 +85,9 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
     status TEXT NOT NULL DEFAULT 'CLOSED',
     reason TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(event_id, symbol)
+    UNIQUE(event_time_utc, symbol)
 );
+
 
 CREATE TABLE IF NOT EXISTS paper_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_reminders_event ON event_reminders(event_id);
 
 CREATE INDEX IF NOT EXISTS idx_backtest_event ON backtest_trades(event_id);
 CREATE INDEX IF NOT EXISTS idx_backtest_symbol ON backtest_trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_backtest_ts ON backtest_trades(event_time_utc);
 """
 
 

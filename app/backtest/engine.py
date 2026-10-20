@@ -2,6 +2,13 @@
 Backtest paper engine на історичних подіях.
 
 Не чіпає paper_account / paper_trades — пише у backtest_trades.
+
+FIX:
+- Дедуплікація по (event_time_utc, symbol), а не (event_id, symbol).
+  Це виправляє дублювання угод для подій в один timestamp
+  (напр. Core PCE + Final GDP о 12:30 → одна угода на символ, не дві).
+- Додано skip_reason "duplicate_ts_symbol" для прозорості.
+- Логування кожного skip на debug-рівні.
 """
 
 import logging
@@ -110,34 +117,44 @@ async def run_backtest(
 
         logger.info(f"[backtest] candidates={len(candidates)}, "
                     f"hit_rate_thr={hit_rate_threshold}, "
-                    f"min_move={min_move_pct}, symbols={syms}")
+                    f"min_move={min_move_pct}, symbols={syms}, "
+                    f"spot_long_only={spot_long_only}, "
+                    f"exit_offset={exit_offset_min}")
 
         opened = 0
         skipped_reasons: dict[str, int] = {}
 
-        def _skip(reason: str):
+        def _skip(reason: str, detail: str = ""):
             skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+            if detail:
+                logger.debug(f"[backtest] skip {reason}: {detail}")
 
         for c in candidates:
             event_ts = _iso_to_ms(c["time_utc"])
             if event_ts is None:
-                _skip("bad_time")
+                _skip("bad_time", c["title"])
                 continue
 
             hits, misses, rate = await _hit_rate(db, c["title"])
             if hits + misses < min_events:
-                _skip("n_too_small")
+                _skip("n_too_small",
+                      f"{c['title']} n={hits+misses} < {min_events}")
                 continue
             if rate < hit_rate_threshold:
-                _skip("hit_rate_low")
+                _skip("hit_rate_low",
+                      f"{c['title']} rate={rate:.0f}% < {hit_rate_threshold}%")
                 continue
 
             for sym in syms:
+                # FIX: дедуплікація по (event_time_utc, symbol), не по event_id.
+                # Це критично для подій в один timestamp (Core PCE + Final GDP).
                 cur = await db.execute("""
                     SELECT 1 FROM backtest_trades
-                    WHERE event_id = ? AND symbol = ?
-                """, (c["id"], sym))
+                    WHERE event_time_utc = ? AND symbol = ?
+                """, (c["time_utc"], sym))
                 if await cur.fetchone():
+                    _skip("duplicate_ts_symbol",
+                          f"{c['time_utc']} {sym} (вже є угода на цей timestamp)")
                     continue
 
                 cur = await db.execute("""
@@ -150,23 +167,26 @@ async def run_backtest(
                 """, (c["id"], sym))
                 row = await cur.fetchone()
                 if not row:
-                    _skip("no_impact")
+                    _skip("no_impact", f"{c['title']} {sym}")
                     continue
 
                 ret_15 = row["ret_15m"]
                 if ret_15 is None or abs(ret_15) < min_move_pct:
-                    _skip("move_too_small")
+                    _skip("move_too_small",
+                          f"{c['title']} {sym} |ret15|={abs(ret_15 or 0):.3f}% < {min_move_pct}%")
                     continue
 
                 direction = "long" if row["expected_dir"] == "up" else "short"
                 if spot_long_only and direction == "short":
-                    _skip("spot_long_only")
+                    _skip("spot_long_only",
+                          f"{c['title']} {sym} dir={direction}")
                     continue
 
                 entry_ts = event_ts + ENTRY_OFFSET_MIN * 60_000
                 entry_price = await _get_close(db, sym, "1", entry_ts)
                 if entry_price is None:
-                    _skip("no_entry_candle")
+                    _skip("no_entry_candle",
+                          f"{c['title']} {sym} entry_ts={entry_ts}")
                     continue
 
                 if direction == "long":
@@ -178,7 +198,8 @@ async def run_backtest(
                 exit_ts = event_ts + exit_offset_min * 60_000
                 exit_price = await _get_close(db, sym, "1", exit_ts)
                 if exit_price is None:
-                    _skip("no_exit_candle")
+                    _skip("no_exit_candle",
+                          f"{c['title']} {sym} exit_ts={exit_ts}")
                     continue
 
                 if direction == "long":
