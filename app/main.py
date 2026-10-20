@@ -41,6 +41,12 @@ from app.bot.notifier import (
 )
 from app.paper.engine import process_paper_engine
 from app.paper.stats import get_account, get_trades, get_equity_curve, reset_account
+from app.backtest.engine import (
+    run_backtest,
+    get_backtest_trades,
+    get_backtest_equity_curve,
+    clear_backtest,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -370,6 +376,49 @@ async def tools_paper_diagnostics():
         "candidates_in_entry_window": in_window,
         "entry_window_min": 30,
     }
+
+# ============================================================================
+# API: Backtest
+# ============================================================================
+@app.post("/backtest/run")
+async def api_backtest_run(
+    days: int | None = Query(None, ge=1, le=365),
+    reset: bool = True,
+    hit_rate_threshold: float = Query(60.0, ge=0, le=100),
+    min_move_pct: float = Query(0.30, ge=0, le=10),
+    min_events: int = Query(1, ge=1, le=50),
+    symbols: str = Query("SOLUSDT,BTCUSDT"),
+    spot_long_only: bool = True,
+    exit_offset_min: int = Query(60, ge=1, le=240),
+    trade_size_usd: float = Query(10.0, ge=1, le=1000),
+):
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    return await run_backtest(
+        days=days,
+        reset=reset,
+        hit_rate_threshold=hit_rate_threshold,
+        min_move_pct=min_move_pct,
+        min_events=min_events,
+        symbols=syms,
+        spot_long_only=spot_long_only,
+        exit_offset_min=exit_offset_min,
+        trade_size_usd=trade_size_usd,
+    )
+
+
+@app.get("/backtest/trades")
+async def api_backtest_trades(limit: int = 500):
+    return await get_backtest_trades(limit=limit)
+
+
+@app.get("/backtest/equity_curve")
+async def api_backtest_equity_curve():
+    return await get_backtest_equity_curve()
+
+
+@app.post("/backtest/clear")
+async def api_backtest_clear():
+    return await clear_backtest()
 
 
 # ============================================================================

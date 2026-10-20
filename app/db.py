@@ -66,6 +66,28 @@ CREATE TABLE IF NOT EXISTS paper_account (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS backtest_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    event_title TEXT,
+    event_time_utc TEXT,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    entry_ts INTEGER NOT NULL,
+    entry_price REAL NOT NULL,
+    entry_fee REAL NOT NULL,
+    exit_ts INTEGER,
+    exit_price REAL,
+    exit_fee REAL,
+    size_usd REAL NOT NULL,
+    pnl REAL,
+    pnl_pct REAL,
+    status TEXT NOT NULL DEFAULT 'CLOSED',
+    reason TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(event_id, symbol)
+);
+
 CREATE TABLE IF NOT EXISTS paper_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -108,6 +130,9 @@ CREATE INDEX IF NOT EXISTS idx_impact_hit ON event_impact(hit);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_event ON paper_trades(event_id);
 CREATE INDEX IF NOT EXISTS idx_reminders_event ON event_reminders(event_id);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_event ON backtest_trades(event_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_symbol ON backtest_trades(symbol);
 """
 
 

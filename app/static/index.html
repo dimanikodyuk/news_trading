@@ -151,6 +151,7 @@
     <div class="tab" data-tab="compare">⚖️ Порівняння</div>
     <div class="tab" data-tab="heatmap">Heatmap</div>
     <div class="tab" data-tab="tools">🔧 Інструменти</div>
+    <div class="tab" data-tab="backtest">🧪 Backtest</div>
     <div class="tab" data-tab="help">Довідка</div>
   </div>
 
@@ -584,6 +585,133 @@
     </div>
   </div>
 
+
+   <!-- ==================== BACKTEST ==================== -->
+  <div id="tab-backtest" style="display:none">
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+      <h1 class="text-2xl font-bold">🧪 Backtest</h1>
+      <div class="text-sm text-slate-500">
+        Прогін paper-стратегії на історичних подіях (не чіпає реальний акаунт)
+      </div>
+    </div>
+
+    <!-- Параметри -->
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">⚙ Параметри прогону</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label class="text-xs text-slate-400">Днів назад (порожнє = всі)</label>
+          <input type="number" id="bt-days" placeholder="всі" min="1" max="365"
+                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Hit Rate threshold, %</label>
+          <input type="number" id="bt-hit-rate" value="60" min="0" max="100" step="5"
+                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Min |ret_15m|, %</label>
+          <input type="number" id="bt-min-move" value="0.30" min="0" max="10" step="0.05"
+                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Min events для trust</label>
+          <input type="number" id="bt-min-events" value="1" min="1" max="50"
+                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Символи (через кому)</label>
+          <input type="text" id="bt-symbols" value="SOLUSDT,BTCUSDT"
+                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Exit offset, хв</label>
+          <input type="number" id="bt-exit-offset" value="60" min="1" max="240"
+                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Розмір угоди, $</label>
+          <input type="number" id="bt-size-usd" value="10" min="1" max="1000" step="1"
+                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+        </div>
+        <div class="flex items-end">
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="bt-long-only" checked class="w-4 h-4">
+            <span>SPOT LONG-only</span>
+          </label>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button onclick="runBacktest()" id="bt-run-btn"
+                class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded text-sm font-semibold">
+          ▶ Запустити backtest
+        </button>
+        <button onclick="clearBacktest()"
+                class="px-4 py-2 bg-red-700 hover:bg-red-600 rounded text-sm">
+          🗑 Очистити результати
+        </button>
+      </div>
+      <div class="hint mt-2">
+        Backtest не чіпає <code class="bg-slate-700 px-1 rounded">paper_account</code> /
+        <code class="bg-slate-700 px-1 rounded">paper_trades</code> — пише у
+        <code class="bg-slate-700 px-1 rounded">backtest_trades</code>.
+      </div>
+    </div>
+
+    <!-- Підсумок -->
+    <div class="card p-4 mb-6" id="bt-summary-card" style="display:none">
+      <h2 class="section-title">📊 Підсумок</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="bt-summary"></div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4" id="bt-summary-2"></div>
+    </div>
+
+    <!-- Skip reasons -->
+    <div class="card p-4 mb-6" id="bt-skips-card" style="display:none">
+      <h2 class="section-title">🚫 Причини skip</h2>
+      <div id="bt-skips"></div>
+    </div>
+
+    <!-- По символах -->
+    <div class="card p-4 mb-6" id="bt-by-symbol-card" style="display:none">
+      <h2 class="section-title">📈 По символах</h2>
+      <table>
+        <thead><tr>
+          <th>Символ</th>
+          <th class="text-right">Угод</th>
+          <th class="text-right">Wins</th>
+          <th class="text-right">Win Rate</th>
+          <th class="text-right">P&L</th>
+        </tr></thead>
+        <tbody id="bt-by-symbol-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Equity curve -->
+    <div class="card p-4 mb-6" id="bt-equity-card" style="display:none">
+      <h2 class="section-title">📈 Equity curve (кумулятивний P&L)</h2>
+      <canvas id="bt-equity-chart" height="80"></canvas>
+      <div class="hint mt-2" id="bt-equity-hint"></div>
+    </div>
+
+    <!-- Угоди -->
+    <div class="card p-4" id="bt-trades-card" style="display:none">
+      <h2 class="section-title">📋 Угоди</h2>
+      <table>
+        <thead><tr>
+          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
+          <th>Подія</th>
+          <th>Символ</th>
+          <th class="text-center">Напрямок</th>
+          <th class="text-right">Entry</th>
+          <th class="text-right">Exit</th>
+          <th class="text-right">P&L</th>
+          <th class="text-right">P&L %</th>
+        </tr></thead>
+        <tbody id="bt-trades-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ==================== TOOLS ==================== -->
   <div id="tab-tools" style="display:none">
     <h1 class="text-2xl font-bold mb-6">🔧 Інструменти</h1>
@@ -884,6 +1012,8 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
     if (t.dataset.tab === 'compare') loadCompare();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
+    if (t.dataset.tab === 'backtest') {loadBacktestTrades(); loadBacktestEquity(); }
+
   };
 });
 
@@ -2097,6 +2227,200 @@ document.addEventListener('DOMContentLoaded', () => {
   connect();
 })();
 
+// ==================== BACKTEST ====================
+let btEquityChart = null;
+
+async function runBacktest() {
+  const btn = document.getElementById('bt-run-btn');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '⏳ Виконується...';
+  btn.disabled = true;
+
+  const params = new URLSearchParams();
+  const days = document.getElementById('bt-days').value.trim();
+  if (days) params.set('days', days);
+  params.set('reset', 'true');
+  params.set('hit_rate_threshold', document.getElementById('bt-hit-rate').value);
+  params.set('min_move_pct', document.getElementById('bt-min-move').value);
+  params.set('min_events', document.getElementById('bt-min-events').value);
+  params.set('symbols', document.getElementById('bt-symbols').value);
+  params.set('spot_long_only', document.getElementById('bt-long-only').checked);
+  params.set('exit_offset_min', document.getElementById('bt-exit-offset').value);
+  params.set('trade_size_usd', document.getElementById('bt-size-usd').value);
+
+  try {
+    const r = await api(`/backtest/run?${params.toString()}`, { method: 'POST' });
+    renderBacktestResult(r);
+    await loadBacktestTrades();
+    await loadBacktestEquity();
+  } catch (e) {
+    alert('Помилка: ' + e);
+  } finally {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+}
+
+function renderBacktestResult(r) {
+  const s = r.summary || {};
+  const p = r.params || {};
+
+  // Підсумок
+  document.getElementById('bt-summary-card').style.display = '';
+  document.getElementById('bt-summary').innerHTML = `
+    ${metric('Угод', s.n || 0, '', 'Скільки угод згенеровано')}
+    ${metric('Wins', s.wins || 0, 'up', 'Прибуткових')}
+    ${metric('Losses', s.losses || 0, 'down', 'Збиткових')}
+    ${metric('Win Rate', (s.win_rate ?? 0).toFixed(1) + '%',
+            (s.win_rate ?? 0) >= 50 ? 'up' : 'down', 'Wins / n')}
+  `;
+  document.getElementById('bt-summary-2').innerHTML = `
+    ${metric('Total P&L', fmtUsd(s.total_pnl), clsFor(s.total_pnl), 'Сума P&L')}
+    ${metric('Avg P&L', fmtUsd(s.avg_pnl), clsFor(s.avg_pnl), 'Середній P&L на угоду')}
+    ${metric('Avg Win', fmtUsd(s.avg_win), 'up', 'Середній прибуток')}
+    ${metric('Avg Loss', fmtUsd(s.avg_loss), 'down', 'Середній збиток')}
+  `;
+
+  // Параметри + skip reasons
+  const skips = r.skipped_reasons || {};
+  const skipsEntries = Object.entries(skips).sort((a, b) => b[1] - a[1]);
+
+  document.getElementById('bt-skips-card').style.display = '';
+  const paramsHtml = Object.entries(p).map(([k, v]) =>
+    `<div class="text-xs"><span class="text-slate-400">${k}:</span> <span class="font-mono text-cyan-400">${JSON.stringify(v)}</span></div>`
+  ).join('');
+
+  let skipsHtml = '';
+  if (skipsEntries.length > 0) {
+    skipsHtml = skipsEntries.map(([reason, count]) =>
+      `<div class="text-xs"><span class="text-amber-400 font-mono">${reason}</span>: <span class="text-white">${count}</span></div>`
+    ).join('');
+  } else {
+    skipsHtml = '<div class="text-xs text-slate-500">Немає</div>';
+  }
+
+  document.getElementById('bt-skips').innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <div class="text-sm font-semibold mb-2">Кандидатів / Відкрито</div>
+        <div class="text-xs"><span class="text-slate-400">candidates:</span> <span class="font-mono text-cyan-400">${r.candidates}</span></div>
+        <div class="text-xs"><span class="text-slate-400">opened:</span> <span class="font-mono text-green-400">${r.opened}</span></div>
+        <div class="mt-3 text-sm font-semibold mb-2">Параметри</div>
+        ${paramsHtml}
+      </div>
+      <div>
+        <div class="text-sm font-semibold mb-2">Причини skip</div>
+        ${skipsHtml}
+      </div>
+    </div>
+  `;
+
+  // По символах
+  if (r.by_symbol && r.by_symbol.length > 0) {
+    document.getElementById('bt-by-symbol-card').style.display = '';
+    document.getElementById('bt-by-symbol-tbody').innerHTML = r.by_symbol.map(x => `
+      <tr>
+        <td>${symbolBadge(x.symbol)}</td>
+        <td class="text-right font-mono">${x.n}</td>
+        <td class="text-right font-mono up">${x.wins}</td>
+        <td class="text-right font-mono ${x.win_rate >= 50 ? 'up' : 'down'}">${x.win_rate.toFixed(1)}%</td>
+        <td class="text-right font-mono ${clsFor(x.total_pnl)}">${fmtUsd(x.total_pnl)}</td>
+      </tr>
+    `).join('');
+  } else {
+    document.getElementById('bt-by-symbol-card').style.display = 'none';
+  }
+}
+
+async function loadBacktestTrades() {
+  try {
+    const trades = await api('/backtest/trades?limit=500');
+    if (trades.length === 0) {
+      document.getElementById('bt-trades-card').style.display = 'none';
+      return;
+    }
+    document.getElementById('bt-trades-card').style.display = '';
+    document.getElementById('bt-trades-tbody').innerHTML = trades.map(t => {
+      const pnlSign = (t.pnl || 0) >= 0 ? '+' : '';
+      return `
+        <tr class="cursor-pointer" onclick="openEvent(${t.event_id})">
+          <td class="font-mono text-xs">${fmtBothFull(t.event_time_utc)}</td>
+          <td class="text-cyan-400">${t.event_title}</td>
+          <td>${symbolBadge(t.symbol)}</td>
+          <td class="text-center">${dirBadge(t.direction)}</td>
+          <td class="text-right font-mono">${fmtUsd4(t.entry_price)}</td>
+          <td class="text-right font-mono">${fmtUsd4(t.exit_price)}</td>
+          <td class="text-right font-mono ${clsFor(t.pnl)}">${pnlSign}${fmtUsd(t.pnl)}</td>
+          <td class="text-right font-mono ${clsFor(t.pnl)}">${pnlSign}${(t.pnl_pct || 0).toFixed(3)}%</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('loadBacktestTrades failed', e);
+  }
+}
+
+async function loadBacktestEquity() {
+  try {
+    const curve = await api('/backtest/equity_curve');
+    const card = document.getElementById('bt-equity-card');
+    if (curve.length === 0) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+
+    document.getElementById('bt-equity-hint').textContent =
+      `${curve.length} угод, фінальний cumulative: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
+
+    const labels = curve.map(p => {
+      const d = new Date(p.ts);
+      return d.toLocaleString('uk-UA', {
+        timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+      }).replace(',', '');
+    });
+    const data = curve.map(p => p.cum_pnl);
+
+    if (btEquityChart) btEquityChart.destroy();
+    btEquityChart = new Chart(document.getElementById('bt-equity-chart'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Cumulative P&L, $',
+          data,
+          borderColor: '#22d3ee',
+          backgroundColor: 'rgba(34,211,238,0.1)',
+          borderWidth: 2, tension: 0.2, pointRadius: 3, fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#e2e8f0' } } },
+        scales: {
+          x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
+               title: { display: true, text: 'P&L, $', color: '#94a3b8' } },
+        }
+      }
+    });
+  } catch (e) {
+    console.error('loadBacktestEquity failed', e);
+  }
+}
+
+async function clearBacktest() {
+  if (!confirm('Видалити всі backtest-угоди?')) return;
+  await api('/backtest/clear', { method: 'POST' });
+  document.getElementById('bt-summary-card').style.display = 'none';
+  document.getElementById('bt-skips-card').style.display = 'none';
+  document.getElementById('bt-by-symbol-card').style.display = 'none';
+  document.getElementById('bt-equity-card').style.display = 'none';
+  document.getElementById('bt-trades-card').style.display = 'none';
+  if (btEquityChart) { btEquityChart.destroy(); btEquityChart = null; }
+}
+
 // ==================== TOOLS ====================
 function showToolsResult(label, data) {
   const card = document.getElementById('tools-result-card');
@@ -2295,6 +2619,8 @@ setInterval(() => {
   if (active.dataset.tab === 'events') loadEvents();
   if (active.dataset.tab === 'calendar') loadCalendar();
   if (active.dataset.tab === 'compare') loadCompare();
+  if (active.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
+
 }, 30000);
 
 setInterval(() => {
