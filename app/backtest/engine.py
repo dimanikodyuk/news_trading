@@ -3,13 +3,11 @@ Backtest paper engine на історичних подіях.
 
 Не чіпає paper_account / paper_trades — пише у backtest_trades.
 
-FIX (v2):
-- Дедуплікація по (event_time_utc, symbol, direction), а не (event_time_utc, symbol).
-  Це дозволяє мати різні угоди для подій в один timestamp, якщо в них
-  різний expected_dir (напр. PPI=down→short, Retail Sales=up→long).
-- Однакові напрямки в кластері все ще дедуплікуються (щоб не було
-  3 однакових SHORT-угод на одному символі).
-- Логування кожного skip на debug-рівні з деталями.
+FIX (v3):
+- Додано direction_filter: "long" | "short" | None (both).
+  Дозволяє чистий SHORT-only або LONG-only прогін.
+- Дедуплікація по (event_time_utc, symbol, direction).
+- by_direction у відповіді.
 """
 
 import logging
@@ -84,8 +82,11 @@ async def run_backtest(
     spot_long_only: bool = SPOT_LONG_ONLY,
     exit_offset_min: int = EXIT_OFFSET_MIN,
     trade_size_usd: float = TRADE_SIZE_USD,
+    direction_filter: str | None = None,   # NEW: "long" | "short" | None
 ) -> dict:
     syms = symbols or TRADE_SYMBOLS
+    if direction_filter not in (None, "long", "short"):
+        raise ValueError(f"direction_filter must be 'long'/'short'/None, got {direction_filter!r}")
 
     async with get_db() as db:
         if reset:
@@ -120,7 +121,8 @@ async def run_backtest(
                     f"hit_rate_thr={hit_rate_threshold}, "
                     f"min_move={min_move_pct}, symbols={syms}, "
                     f"spot_long_only={spot_long_only}, "
-                    f"exit_offset={exit_offset_min}")
+                    f"exit_offset={exit_offset_min}, "
+                    f"direction_filter={direction_filter}")
 
         opened = 0
         skipped_reasons: dict[str, int] = {}
@@ -167,14 +169,18 @@ async def run_backtest(
                     continue
 
                 direction = "long" if row["expected_dir"] == "up" else "short"
+
+                # NEW: фільтр напрямку
+                if direction_filter and direction != direction_filter:
+                    _skip("direction_filter",
+                          f"{c['title']} {sym} dir={direction} != {direction_filter}")
+                    continue
+
                 if spot_long_only and direction == "short":
                     _skip("spot_long_only",
                           f"{c['title']} {sym} dir={direction}")
                     continue
 
-                # FIX v2: дедуплікація по (event_time_utc, symbol, direction).
-                # Дозволяє різні напрямки в одному кластері,
-                # але не дублює однакові.
                 cur = await db.execute("""
                     SELECT 1 FROM backtest_trades
                     WHERE event_time_utc = ? AND symbol = ? AND direction = ?
@@ -261,7 +267,6 @@ async def run_backtest(
         """)
         by_sym = [dict(r) for r in await cur.fetchall()]
 
-        # FIX v2: розбивка по direction
         cur = await db.execute("""
             SELECT direction, COUNT(*) AS n,
                    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
@@ -270,11 +275,33 @@ async def run_backtest(
         """)
         by_direction = [dict(r) for r in await cur.fetchall()]
 
+        # NEW: агрегація по незалежних подіях (event_time_utc + direction)
+        cur = await db.execute("""
+            SELECT
+                COUNT(*) AS n_events,
+                SUM(CASE WHEN pnl_sum > 0 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN pnl_sum <= 0 THEN 1 ELSE 0 END) AS losses,
+                SUM(pnl_sum) AS total_pnl,
+                AVG(pnl_sum) AS avg_pnl
+            FROM (
+                SELECT event_time_utc, direction, SUM(pnl) AS pnl_sum
+                FROM backtest_trades
+                GROUP BY event_time_utc, direction
+            )
+        """)
+        se = await cur.fetchone()
+
     n = s["n"] or 0
     wins = s["wins"] or 0
     losses = s["losses"] or 0
     total_pnl = s["total_pnl"] or 0
     win_rate = (wins / n * 100) if n > 0 else 0
+
+    n_events = se["n_events"] or 0
+    ev_wins = se["wins"] or 0
+    ev_losses = se["losses"] or 0
+    ev_total_pnl = se["total_pnl"] or 0
+    ev_win_rate = (ev_wins / n_events * 100) if n_events > 0 else 0
 
     return {
         "params": {
@@ -286,6 +313,7 @@ async def run_backtest(
             "spot_long_only": spot_long_only,
             "exit_offset_min": exit_offset_min,
             "trade_size_usd": trade_size_usd,
+            "direction_filter": direction_filter,
         },
         "candidates": len(candidates),
         "opened": opened,
@@ -299,6 +327,14 @@ async def run_backtest(
             "avg_pnl": round(s["avg_pnl"] or 0, 4),
             "avg_win": round(s["avg_win"] or 0, 4),
             "avg_loss": round(s["avg_loss"] or 0, 4),
+        },
+        "by_events": {
+            "n": n_events,
+            "wins": ev_wins,
+            "losses": ev_losses,
+            "win_rate": round(ev_win_rate, 1),
+            "total_pnl": round(ev_total_pnl, 4),
+            "avg_pnl": round(se["avg_pnl"] or 0, 4),
         },
         "by_symbol": [
             {

@@ -391,6 +391,7 @@ async def api_backtest_run(
     spot_long_only: bool = True,
     exit_offset_min: int = Query(60, ge=1, le=240),
     trade_size_usd: float = Query(10.0, ge=1, le=1000),
+    direction_filter: str | None = Query(None),
 ):
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     return await run_backtest(
@@ -403,8 +404,8 @@ async def api_backtest_run(
         spot_long_only=spot_long_only,
         exit_offset_min=exit_offset_min,
         trade_size_usd=trade_size_usd,
+        direction_filter=direction_filter,
     )
-
 
 @app.get("/backtest/trades")
 async def api_backtest_trades(limit: int = 500):
