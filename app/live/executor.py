@@ -68,31 +68,101 @@ def _get_session() -> Optional[HTTP]:
 
 async def get_bybit_balance() -> dict:
     """
-    Повертає баланс USDT на Spot-гаманці.
-    Якщо ключів немає — повертає {"error": "..."}.
+    Повертає баланс USDT.
+    Працює і для Unified Trading Account (UTA), і для класичного Spot.
+    Безпечно обробляє порожні рядки ("") від Bybit.
     """
     session = _get_session()
     if session is None:
         return {"error": "API ключі не задані"}
 
-    try:
-        resp = session.get_wallet_balance(accountType="UNIFIED")
-        if resp.get("retCode") != 0:
-            return {"error": resp.get("retMsg", "unknown")}
+    def _safe_float(v, default=0.0):
+        """float(v) але безпечно для '', None, 'N/A' тощо."""
+        if v is None:
+            return default
+        try:
+            s = str(v).strip()
+            if not s:
+                return default
+            return float(s)
+        except (ValueError, TypeError):
+            return default
 
-        # Шукаємо USDT у списку монет
-        coins = resp["result"]["list"][0].get("coin", [])
-        for c in coins:
-            if c.get("coin") == "USDT":
-                # walletBalance — загальний, availableToWithdraw — доступний
+    try:
+        # 1) Пробуємо UNIFIED (UTA)
+        resp = session.get_wallet_balance(accountType="UNIFIED")
+        if resp.get("retCode") == 0:
+            result_list = resp.get("result", {}).get("list", [])
+            if result_list:
+                coins = result_list[0].get("coin", [])
+                for c in coins:
+                    if c.get("coin") == "USDT":
+                        # У UTA реальний баланс — у полях equity / walletBalance / free
+                        # Пробуємо в порядку пріоритету
+                        balance = (
+                            _safe_float(c.get("walletBalance"))
+                            or _safe_float(c.get("equity"))
+                            or _safe_float(c.get("usdValue"))
+                        )
+                        available = (
+                            _safe_float(c.get("availableToWithdraw"))
+                            or _safe_float(c.get("free"))
+                            or _safe_float(c.get("availableToBorrow"))
+                            or balance
+                        )
+                        return {
+                            "usdt_balance": balance,
+                            "usdt_available": available,
+                            "account_type": "UNIFIED",
+                        }
+                # USDT не знайдено серед монет
                 return {
-                    "usdt_balance": float(c.get("walletBalance", 0)),
-                    "usdt_available": float(c.get("availableToWithdraw", c.get("walletBalance", 0))),
+                    "usdt_balance": 0.0,
+                    "usdt_available": 0.0,
+                    "account_type": "UNIFIED",
+                    "note": "USDT не знайдено серед монет",
                 }
-        return {"usdt_balance": 0.0, "usdt_available": 0.0}
+            return {
+                "usdt_balance": 0.0,
+                "usdt_available": 0.0,
+                "account_type": "UNIFIED",
+                "note": "Порожній список монет",
+            }
+
+        # 2) Fallback — класичний SPOT
+        resp2 = session.get_wallet_balance(accountType="SPOT")
+        if resp2.get("retCode") == 0:
+            result_list = resp2.get("result", {}).get("list", [])
+            if result_list:
+                coins = result_list[0].get("coin", [])
+                for c in coins:
+                    if c.get("coin") == "USDT":
+                        balance = _safe_float(c.get("walletBalance"))
+                        available = _safe_float(c.get("free")) or balance
+                        return {
+                            "usdt_balance": balance,
+                            "usdt_available": available,
+                            "account_type": "SPOT",
+                        }
+            return {
+                "usdt_balance": 0.0,
+                "usdt_available": 0.0,
+                "account_type": "SPOT",
+            }
+
+        # 3) Не вдалось жодним способом
+        return {
+            "error": (
+                f"Bybit: UNIFIED retCode={resp.get('retCode')} "
+                f"({resp.get('retMsg', '?')}); "
+                f"SPOT retCode={resp2.get('retCode')} "
+                f"({resp2.get('retMsg', '?')})"
+            )
+        }
+
     except Exception as ex:
         logger.exception(f"[LIVE] get_bybit_balance failed: {ex}")
-        return {"error": str(ex)}
+        return {"error": f"{type(ex).__name__}: {ex}"}
 
 
 async def process_live_engine() -> dict:
