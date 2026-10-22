@@ -7,7 +7,7 @@ Scheduler:
   - refresh_calendar (day=today) — о 00:01 UTC щодня
   - load_history_sync — кожні 24 години
   - recompute_impact_job — кожні 30 хвилин
-  - paper_engine_job — кожні 5 хвилин
+  - paper_engine_job — кожні 1 хв
   - check_upcoming_events — кожну хвилину (нагадування)
   - weekly_report_job — неділя 20:00 UTC
 """
@@ -46,6 +46,12 @@ from app.backtest.engine import (
     get_backtest_trades,
     get_backtest_equity_curve,
     clear_backtest,
+)
+from app.naive.engine import (
+    run_naive_test,
+    get_naive_trades,
+    get_naive_equity_curve,
+    clear_naive,
 )
 
 logging.basicConfig(
@@ -278,7 +284,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(recompute_impact_job, "interval",
                       minutes=30, id="impact_recompute_auto")
     scheduler.add_job(paper_engine_job, "interval",
-                      minutes=1, id="paper_engine") # FIX: було 5
+                      minutes=1, id="paper_engine")
     scheduler.add_job(check_upcoming_events, "interval",
                       minutes=1, id="check_upcoming")
     scheduler.add_job(weekly_report_job, CronTrigger(day_of_week="sun", hour=20, minute=0),
@@ -315,7 +321,6 @@ async def tools_paper_diagnostics():
     now_ms = int(now.timestamp() * 1000)
 
     async with get_db() as db:
-        # Скільки impact мають price_t1 / price_t60
         cur = await db.execute("""
             SELECT symbol,
                    COUNT(*) AS n,
@@ -326,7 +331,6 @@ async def tools_paper_diagnostics():
         """)
         impact_by_symbol = [dict(r) for r in await cur.fetchall()]
 
-        # Скільки подій проходять candidates-фільтр
         cur = await db.execute("""
             SELECT COUNT(*) AS n FROM events e
             WHERE e.importance='high'
@@ -341,7 +345,6 @@ async def tools_paper_diagnostics():
         """)
         candidates_total = (await cur.fetchone())["n"]
 
-        # Кандидати у вікні входу зараз
         cur = await db.execute("""
             SELECT e.id, e.title, e.time_utc, e.importance
             FROM events e
@@ -365,7 +368,7 @@ async def tools_paper_diagnostics():
         if ts is None:
             continue
         entry_min = ts + 60_000
-        entry_max = ts + 30 * 60_000  # ENTRY_WINDOW_MIN
+        entry_max = ts + 30 * 60_000
         if entry_min <= now_ms <= entry_max:
             in_window.append(c)
 
@@ -376,6 +379,43 @@ async def tools_paper_diagnostics():
         "candidates_in_entry_window": in_window,
         "entry_window_min": 30,
     }
+
+
+# ============================================================================
+# API: Naive ("тупо тест")
+# ============================================================================
+@app.post("/naive/run")
+async def api_naive_run(
+    days: int | None = Query(None, ge=1, le=3650),
+    reset: bool = True,
+    symbols: str = Query("SOLUSDT,BTCUSDT,ETHUSDT"),
+    size_usd: float = Query(10.0, ge=1, le=1000),
+    exit_offset_min: int = Query(60, ge=1, le=240),
+):
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    return await run_naive_test(
+        days=days,
+        symbols=syms,
+        size_usd=size_usd,
+        exit_offset_min=exit_offset_min,
+        reset=reset,
+    )
+
+
+@app.get("/naive/trades")
+async def api_naive_trades(limit: int = 1000):
+    return await get_naive_trades(limit=limit)
+
+
+@app.get("/naive/equity_curve")
+async def api_naive_equity_curve():
+    return await get_naive_equity_curve()
+
+
+@app.post("/naive/clear")
+async def api_naive_clear():
+    return await clear_naive()
+
 
 # ============================================================================
 # API: Backtest
