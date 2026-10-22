@@ -2,7 +2,7 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
 <title>News Trading Bot</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -28,14 +28,16 @@
   .up { color: #22c55e; }
   .down { color: #ef4444; }
   .flat { color: #94a3b8; }
-  .tab { padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; color: #94a3b8; }
+  .tab { padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; color: #94a3b8; user-select: none; -webkit-tap-highlight-color: transparent; }
   .tab:hover { background: #334155; color: #fff; }
+  .tab:active { background: #334155; color: #fff; }
   .tab.active { background: #0891b2; color: #fff; }
   table { width: 100%; font-size: 0.875rem; }
   thead { color: #94a3b8; border-bottom: 1px solid #334155; }
   th { text-align: left; padding: 0.5rem; font-weight: 500; }
   td { padding: 0.5rem; border-bottom: 1px solid #1e293b; }
   tr:hover { background: rgba(51, 65, 85, 0.5); }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .loading { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #334155; border-top-color: #22d3ee; border-radius: 50%; animation: spin 0.6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .tip { position: relative; border-bottom: 1px dotted #64748b; cursor: help; }
@@ -89,8 +91,11 @@
     background: #1e293b;
     border: 1px solid #334155;
     color: #94a3b8;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
   .symbol-tab:hover { background: #334155; color: #fff; }
+  .symbol-tab:active { background: #334155; color: #fff; }
   .symbol-tab.active { background: #0891b2; color: #fff; border-color: #0891b2; }
   .symbol-tab.sol.active { background: #22d3ee; color: #0f172a; border-color: #22d3ee; }
   .symbol-tab.btc.active { background: #f59e0b; color: #0f172a; border-color: #f59e0b; }
@@ -98,7 +103,7 @@
   .symbol-tab.all.active { background: #64748b; color: #fff; border-color: #64748b; }
 
   .zoom-btn {
-    width: 32px; height: 32px;
+    width: 36px; height: 36px;
     border-radius: 0.375rem;
     background: #1e293b;
     border: 1px solid #334155;
@@ -106,8 +111,10 @@
     cursor: pointer;
     font-size: 1rem;
     display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
   }
   .zoom-btn:hover { background: #334155; }
+  .zoom-btn:active { background: #334155; }
   .zoom-btn.reset { width: auto; padding: 0 12px; font-size: 0.75rem; }
 
   .chart-container { position: relative; }
@@ -117,12 +124,56 @@
     display: flex; gap: 4px;
     z-index: 10;
   }
+
+  /* ===== MOBILE ===== */
+  @media (max-width: 768px) {
+    body { font-size: 14px; }
+    main { padding: 0.75rem !important; }
+    .card { padding: 0.75rem !important; }
+    .tab { padding: 0.4rem 0.65rem; font-size: 0.8rem; }
+    .tab[data-tab="live"] .live-pulse { width: 6px; height: 6px; margin-right: 4px; }
+    .section-title { font-size: 1rem; }
+    h1 { font-size: 1.25rem !important; }
+    h2 { font-size: 1rem !important; }
+    th, td { padding: 0.35rem 0.4rem !important; font-size: 0.75rem !important; }
+    table { font-size: 0.75rem !important; }
+    .hint { font-size: 0.65rem; }
+    .equity-badge { font-size: 0.65rem; padding: 0.1rem 0.35rem; }
+    .time-utc { font-size: 0.65rem; }
+    .zoom-btn { width: 32px; height: 32px; font-size: 0.9rem; }
+    .symbol-tab { padding: 0.35rem 0.7rem; font-size: 0.75rem; }
+    .chart-container .zoom-controls { top: 4px; right: 4px; }
+    /* Кнопки для тапу — мінімум 40px */
+    button { min-height: 36px; }
+    /* Інпути — не занадто вузькі */
+    input[type="number"], input[type="text"], select { min-height: 36px; }
+    /* Nav — компактніший */
+    nav { padding: 0.5rem 0.75rem !important; }
+    nav .text-xl { font-size: 1rem !important; }
+    nav .equity-badge { display: none; }
+    /* Modal — на всю ширину */
+    #modal .card { max-height: 95vh; padding: 1rem !important; }
+    #modal-title { font-size: 1.1rem; }
+    /* Grid картки в 2 колонки на мобільному */
+    .grid.md\:grid-cols-4, .grid.md\:grid-cols-5, .grid.md\:grid-cols-7 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    .grid.grid-cols-2.md\:grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    .grid.grid-cols-2.md\:grid-cols-7 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  }
+
+  @media (max-width: 480px) {
+    .tab { padding: 0.35rem 0.55rem; font-size: 0.75rem; }
+    th, td { font-size: 0.7rem !important; }
+    .grid.grid-cols-2.md\:grid-cols-4 { grid-template-columns: 1fr 1fr !important; }
+  }
+
+  /* Забороняємо zoom на iOS при подвійному тапі (щоб не ламало chart) */
+  .chart-container canvas { touch-action: pan-y; }
 </style>
 </head>
 <body class="min-h-screen">
 
-<nav class="bg-slate-800 border-b border-slate-700 px-6 py-3">
-  <div class="max-w-7xl mx-auto flex items-center gap-6 flex-wrap">
+<nav class="bg-slate-800 border-b border-slate-700 px-4 py-3">
+  <div class="max-w-7xl mx-auto flex items-center gap-3 flex-wrap">
     <a href="#" class="text-xl font-bold text-cyan-400">📊 News Bot</a>
     <button onclick="refreshAll()" id="refresh-all-btn"
             class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm tip"
@@ -132,7 +183,7 @@
     <span id="next-high-badge"
           class="equity-badge tip"
           data-tip="Наступна high-подія">⏰ —</span>
-    <span class="ml-auto flex items-center gap-3 text-sm text-slate-500 flex-wrap">
+    <span class="ml-auto flex items-center gap-2 text-sm text-slate-500 flex-wrap">
       <span>SOL/BTC/ETH · <span id="ws-status" class="text-red-400">● offline</span></span>
       <span>· <span class="tip" data-tip="Час у веб-панелі — за Києвом (Europe/Kyiv). У дужках — UTC.">🕒 Київ</span></span>
       <span>· <span class="equity-badge tip" data-tip="Поточний equity paper-акаунту" id="nav-equity">$100.00</span></span>
@@ -140,8 +191,8 @@
   </div>
 </nav>
 
-<main class="max-w-7xl mx-auto p-6">
-  <div class="flex gap-2 mb-6 flex-wrap">
+<main class="max-w-7xl mx-auto p-4">
+  <div class="flex gap-2 mb-4 flex-wrap">
     <div class="tab" data-tab="live"><span class="live-pulse"></span>LIVE</div>
     <div class="tab active" data-tab="dashboard">Дашборд</div>
     <div class="tab" data-tab="events">Події</div>
@@ -159,7 +210,7 @@
 
   <!-- ==================== LIVE ==================== -->
   <div id="tab-live" style="display:none">
-    <div class="flex justify-between items-center mb-4">
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold"><span class="live-pulse"></span>LIVE — події в реальному часі</h1>
       <div class="text-sm text-slate-500">Оновлення: <span class="text-cyan-400">кожні 2 сек</span></div>
     </div>
@@ -170,38 +221,40 @@
     </div>
     <div class="card p-4 mt-6">
       <h2 class="section-title">Останні розраховані події</h2>
-      <table>
-        <thead><tr>
-          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
-          <th>Подія</th>
-          <th>Важл.</th>
-          <th class="text-right">SOL ret 15хв</th>
-          <th class="text-right">SOL ret 60хв</th>
-          <th class="text-center">Очік.</th>
-          <th class="text-center">Hit</th>
-        </tr></thead>
-        <tbody id="live-recent-tbody"><tr><td colspan="7"><span class="loading"></span></td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Час <span class="time-utc">(Київ / UTC)</span></th>
+            <th>Подія</th>
+            <th>Важл.</th>
+            <th class="text-right">SOL ret 15хв</th>
+            <th class="text-right">SOL ret 60хв</th>
+            <th class="text-center">Очік.</th>
+            <th class="text-center">Hit</th>
+          </tr></thead>
+          <tbody id="live-recent-tbody"><tr><td colspan="7"><span class="loading"></span></td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
   <!-- ==================== DASHBOARD ==================== -->
   <div id="tab-dashboard">
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
       <div class="card p-4">
         <div class="text-sm text-slate-400 tip" data-tip="Загальна кількість економічних подій у базі даних.">Всього подій</div>
         <div class="text-3xl font-bold" id="stat-events">—</div>
-        <div class="hint">Подій у БД (high + medium, USD)</div>
+        <div class="hint">Подій у БД</div>
       </div>
       <div class="card p-4">
         <div class="text-sm text-slate-400 tip" data-tip="Кількість хвилинних свічок для SOL/BTC/ETH.">Свічок у БД</div>
         <div class="text-3xl font-bold" id="stat-prices">—</div>
-        <div class="hint">1-хв свічки SOL+BTC+ETH</div>
+        <div class="hint">1-хв свічки</div>
       </div>
       <div class="card p-4">
         <div class="text-sm text-slate-400 tip" data-tip="Скільки пар (подія × символ) мають розрахований вплив.">Розраховано вплив</div>
         <div class="text-3xl font-bold" id="stat-impact">—</div>
-        <div class="hint">Подій × символів з impact</div>
+        <div class="hint">Подій × символів</div>
       </div>
       <div class="card p-4">
         <div class="text-sm text-slate-400 tip" data-tip="Час останньої свічки в БД.">Остання свічка</div>
@@ -210,14 +263,14 @@
       </div>
     </div>
 
-    <div class="card p-4 mb-6" id="hit-rate-card" style="display:none">
+    <div class="card p-4 mb-4" id="hit-rate-card" style="display:none">
       <h2 class="section-title">
         <span class="tip" data-tip="Загальний відсоток влучань.">🎯 Загальний Hit Rate</span>
       </h2>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="hit-rate-summary"></div>
     </div>
 
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h2 class="section-title mb-0">
           <span class="tip" data-tip="Ціна SOLUSDT з маркерами подій.">SOLUSDT — графік з подіями та угодами</span>
@@ -240,7 +293,7 @@
       </div>
     </div>
 
-    <div class="card p-4 mb-6" id="overall-impact-card" style="display:none">
+    <div class="card p-4 mb-4" id="overall-impact-card" style="display:none">
       <h2 class="section-title">
         <span class="tip" data-tip="Середній рух ціни SOLUSDT після всіх оброблених подій.">Вплив — загальна статистика</span>
       </h2>
@@ -248,21 +301,23 @@
     </div>
 
     <div class="card p-4">
-      <div class="flex justify-between items-center mb-3">
+      <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
         <h2 class="section-title mb-0">Останні події</h2>
         <button onclick="runRecompute()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm tip"
                 data-tip="Перерахувати вплив для всіх минулих подій.">Перерахувати вплив</button>
       </div>
-      <table>
-        <thead><tr>
-          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
-          <th>Важл.</th>
-          <th>Вал.</th>
-          <th>Подія</th>
-          <th class="text-center">Hit</th>
-        </tr></thead>
-        <tbody id="recent-events"><tr><td colspan="5"><span class="loading"></span></td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Час <span class="time-utc">(Київ / UTC)</span></th>
+            <th>Важл.</th>
+            <th>Вал.</th>
+            <th>Подія</th>
+            <th class="text-center">Hit</th>
+          </tr></thead>
+          <tbody id="recent-events"><tr><td colspan="5"><span class="loading"></span></td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -271,14 +326,14 @@
     <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold">Події</h1>
       <div class="flex gap-2 flex-wrap items-center">
-        <input type="text" id="events-search" placeholder="🔍 Пошук по назві..."
-               class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200 w-64"
+        <input type="text" id="events-search" placeholder="🔍 Пошук..."
+               class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200 w-40"
                oninput="debouncedLoadEvents()">
         <select id="events-days" class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200" onchange="loadEvents()">
-          <option value="1">Останні 24 год</option>
-          <option value="7" selected>Останні 7 днів</option>
-          <option value="30">Останні 30 днів</option>
-          <option value="90">Останні 90 днів</option>
+          <option value="1">24 год</option>
+          <option value="7" selected>7 днів</option>
+          <option value="30">30 днів</option>
+          <option value="90">90 днів</option>
           <option value="">Всі</option>
         </select>
         <select id="events-importance" class="px-3 py-1 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200" onchange="loadEvents()">
@@ -288,27 +343,27 @@
           <option value="low">Low</option>
         </select>
         <button onclick="exportEventsCsv()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm tip"
-                data-tip="Завантажити CSV з подіями і impact.">
-          ⬇ CSV
-        </button>
+                data-tip="Завантажити CSV.">⬇ CSV</button>
       </div>
     </div>
     <div class="card p-4">
       <div id="events-count" class="text-sm text-slate-400 mb-2">—</div>
-      <table>
-        <thead><tr>
-          <th>ID</th>
-          <th class="tip" data-tip="Час публікації.">Час <span class="time-utc">(Київ / UTC)</span></th>
-          <th>Важл.</th>
-          <th>Вал.</th>
-          <th>Подія</th>
-          <th class="text-right">Ret 15хв</th>
-          <th class="text-right">Ret 60хв</th>
-          <th class="text-center">Очік.</th>
-          <th class="text-center">Hit</th>
-        </tr></thead>
-        <tbody id="events-tbody"><tr><td colspan="9"><span class="loading"></span></td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>ID</th>
+            <th class="tip" data-tip="Час публікації.">Час <span class="time-utc">(Київ / UTC)</span></th>
+            <th>Важл.</th>
+            <th>Вал.</th>
+            <th>Подія</th>
+            <th class="text-right">Ret 15хв</th>
+            <th class="text-right">Ret 60хв</th>
+            <th class="text-center">Очік.</th>
+            <th class="text-center">Hit</th>
+          </tr></thead>
+          <tbody id="events-tbody"><tr><td colspan="9"><span class="loading"></span></td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -320,7 +375,7 @@
         <div class="symbol-tab sol active" data-symbol="SOLUSDT" onclick="switchImpactSymbol('SOLUSDT', this)">SOL</div>
         <div class="symbol-tab btc" data-symbol="BTCUSDT" onclick="switchImpactSymbol('BTCUSDT', this)">BTC</div>
         <div class="symbol-tab eth" data-symbol="ETHUSDT" onclick="switchImpactSymbol('ETHUSDT', this)">ETH</div>
-        <div class="symbol-tab all" data-symbol="" onclick="switchImpactSymbol('', this)">Всі (разом)</div>
+        <div class="symbol-tab all" data-symbol="" onclick="switchImpactSymbol('', this)">Всі</div>
       </div>
     </div>
 
@@ -330,29 +385,31 @@
       </div>
     </div>
 
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <h2 class="section-title">Загальна</h2>
       <div id="impact-overall">—</div>
     </div>
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <h2 class="section-title">Hit / Miss / Neutral по типах подій</h2>
       <canvas id="hit-chart" height="100"></canvas>
     </div>
     <div class="card p-4">
       <h2 class="section-title">По типах подій</h2>
-      <table>
-        <thead><tr>
-          <th>Подія</th><th>Важл.</th>
-          <th class="text-right">n</th>
-          <th class="text-right">Avg +5хв</th>
-          <th class="text-right">Avg +15хв</th>
-          <th class="text-right">Avg +30хв</th>
-          <th class="text-right">Avg +60хв</th>
-          <th class="text-right">U/D/F</th>
-          <th class="text-right">Hit Rate</th>
-        </tr></thead>
-        <tbody id="impact-tbody"><tr><td colspan="9"><span class="loading"></span></td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Подія</th><th>Важл.</th>
+            <th class="text-right">n</th>
+            <th class="text-right">Avg +5хв</th>
+            <th class="text-right">Avg +15хв</th>
+            <th class="text-right">Avg +30хв</th>
+            <th class="text-right">Avg +60хв</th>
+            <th class="text-right">U/D/F</th>
+            <th class="text-right">Hit Rate</th>
+          </tr></thead>
+          <tbody id="impact-tbody"><tr><td colspan="9"><span class="loading"></span></td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -360,70 +417,61 @@
   <div id="tab-paper" style="display:none">
     <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold">💰 Paper Trading</h1>
-      <div class="flex gap-2">
-        <button onclick="runPaperEngine()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">▶ Запустити engine</button>
-        <button onclick="resetPaper()" class="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm">↺ Скинути акаунт</button>
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="runPaperEngine()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">▶ Запустити</button>
+        <button onclick="resetPaper()" class="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm">↺ Скинути</button>
         <button onclick="exportPaperCsv()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">⬇ CSV</button>
       </div>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-      <div class="card p-4">
-        <div class="text-sm text-slate-400">Початковий</div>
-        <div class="text-3xl font-bold font-mono" id="paper-initial">—</div>
-      </div>
-      <div class="card p-4">
-        <div class="text-sm text-slate-400">Equity</div>
-        <div class="text-3xl font-bold font-mono" id="paper-equity">—</div>
-        <div class="hint" id="paper-equity-hint">Balance + frozen</div>
-      </div>
-      <div class="card p-4">
-        <div class="text-sm text-slate-400">P&L</div>
-        <div class="text-3xl font-bold font-mono" id="paper-pnl">—</div>
-        <div class="hint" id="paper-pnl-pct">—</div>
-      </div>
-      <div class="card p-4">
-        <div class="text-sm text-slate-400">Win Rate</div>
-        <div class="text-3xl font-bold font-mono" id="paper-winrate">—</div>
-        <div class="hint" id="paper-trades-count">0 угод</div>
-      </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div class="card p-4"><div class="text-sm text-slate-400">Початковий</div><div class="text-2xl font-bold font-mono" id="paper-initial">—</div></div>
+      <div class="card p-4"><div class="text-sm text-slate-400">Equity</div><div class="text-2xl font-bold font-mono" id="paper-equity">—</div><div class="hint" id="paper-equity-hint">—</div></div>
+      <div class="card p-4"><div class="text-sm text-slate-400">P&L</div><div class="text-2xl font-bold font-mono" id="paper-pnl">—</div><div class="hint" id="paper-pnl-pct">—</div></div>
+      <div class="card p-4"><div class="text-sm text-slate-400">Win Rate</div><div class="text-2xl font-bold font-mono" id="paper-winrate">—</div><div class="hint" id="paper-trades-count">0</div></div>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
       <div class="card p-4"><div class="text-sm text-slate-400">Відкрито</div><div class="text-2xl font-bold font-mono text-cyan-400" id="paper-open">—</div></div>
       <div class="card p-4"><div class="text-sm text-slate-400">Закрито</div><div class="text-2xl font-bold font-mono" id="paper-closed">—</div></div>
-      <div class="card p-4"><div class="text-sm text-slate-400">Wins / Losses</div><div class="text-2xl font-bold font-mono"><span class="up" id="paper-wins">0</span> / <span class="down" id="paper-losses">0</span></div></div>
-      <div class="card p-4"><div class="text-sm text-slate-400">Avg Win / Avg Loss</div><div class="text-sm font-mono"><span class="up" id="paper-avg-win">—</span> / <span class="down" id="paper-avg-loss">—</span></div></div>
+      <div class="card p-4"><div class="text-sm text-slate-400">W / L</div><div class="text-2xl font-bold font-mono"><span class="up" id="paper-wins">0</span> / <span class="down" id="paper-losses">0</span></div></div>
+      <div class="card p-4"><div class="text-sm text-slate-400">Avg W / L</div><div class="text-sm font-mono"><span class="up" id="paper-avg-win">—</span> / <span class="down" id="paper-avg-loss">—</span></div></div>
     </div>
 
-    <div class="card p-4 mb-6" id="paper-by-symbol-card" style="display:none">
+    <div class="card p-4 mb-4" id="paper-by-symbol-card" style="display:none">
       <h2 class="section-title">📊 По символах</h2>
-      <table>
-        <thead><tr><th>Символ</th><th class="text-right">Всього</th><th class="text-right">Відкрито</th><th class="text-right">Закрито</th><th class="text-right">W / L</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
-        <tbody id="paper-by-symbol-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Символ</th><th class="text-right">Всього</th><th class="text-right">Відкр.</th><th class="text-right">Закр.</th><th class="text-right">W / L</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
+          <tbody id="paper-by-symbol-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <h2 class="section-title">Equity curve</h2>
       <canvas id="equity-chart" height="80"></canvas>
       <div class="hint mt-2" id="equity-hint">Очікування першої закритої угоди…</div>
     </div>
 
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <h2 class="section-title">Відкриті угоди</h2>
-      <table>
-        <thead><tr><th>ID</th><th>Символ</th><th>Подія</th><th class="text-center">Напрямок</th><th class="text-right">Entry</th><th class="text-right">Поточна</th><th class="text-right">P&L (live)</th><th class="text-right">Розмір</th><th class="text-right">Відкрито</th></tr></thead>
-        <tbody id="paper-open-tbody"><tr><td colspan="9" class="text-slate-500">Немає відкритих угод</td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Символ</th><th>Подія</th><th class="text-center">Напрямок</th><th class="text-right">Entry</th><th class="text-right">Поточна</th><th class="text-right">P&L</th><th class="text-right">Розмір</th><th class="text-right">Відкрито</th></tr></thead>
+          <tbody id="paper-open-tbody"><tr><td colspan="9" class="text-slate-500">Немає відкритих угод</td></tr></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card p-4">
       <h2 class="section-title">Історія угод</h2>
-      <table>
-        <thead><tr><th>ID</th><th>Символ</th><th>Подія</th><th class="text-center">Напрямок</th><th class="text-right">Entry</th><th class="text-right">Exit</th><th class="text-right">P&L</th><th class="text-right">P&L %</th><th class="text-right">Закрито</th></tr></thead>
-        <tbody id="paper-closed-tbody"><tr><td colspan="9" class="text-slate-500">Ще немає закритих угод</td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Символ</th><th>Подія</th><th class="text-center">Напрямок</th><th class="text-right">Entry</th><th class="text-right">Exit</th><th class="text-right">P&L</th><th class="text-right">P&L %</th><th class="text-right">Закрито</th></tr></thead>
+          <tbody id="paper-closed-tbody"><tr><td colspan="9" class="text-slate-500">Ще немає закритих угод</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -458,27 +506,31 @@
       </div>
     </div>
     <div class="card p-4">
-      <table>
-        <thead><tr><th>Час (Київ / UTC)</th><th>Подія</th><th class="text-center">Важл.</th><th class="text-right">SOL ret 15хв</th><th class="text-right">BTC ret 15хв</th><th class="text-right">ETH ret 15хв</th><th class="text-right">Excess SOL-BTC</th><th class="text-center">SOL / BTC / ETH</th></tr></thead>
-        <tbody id="compare-tbody"><tr><td colspan="8"><span class="loading"></span></td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Час (Київ / UTC)</th><th>Подія</th><th class="text-center">Важл.</th><th class="text-right">SOL ret 15хв</th><th class="text-right">BTC ret 15хв</th><th class="text-right">ETH ret 15хв</th><th class="text-right">Excess SOL-BTC</th><th class="text-center">SOL / BTC / ETH</th></tr></thead>
+          <tbody id="compare-tbody"><tr><td colspan="8"><span class="loading"></span></td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
   <!-- ==================== HEATMAP ==================== -->
   <div id="tab-heatmap" style="display:none">
-    <h1 class="text-2xl font-bold mb-6">Heatmap — активність новин</h1>
-    <div class="card p-4 mb-6">
+    <h1 class="text-2xl font-bold mb-4">Heatmap — активність новин</h1>
+    <div class="card p-4 mb-4">
       <h2 class="section-title">Середній ret_15m по (день × година Києва)</h2>
       <div id="heatmap-container" class="overflow-auto"><span class="loading"></span></div>
     </div>
     <div class="card p-4">
       <h2 class="section-title">Cross-asset: SOL vs BTC vs ETH</h2>
       <div id="cross-asset-summary" class="mb-4"></div>
-      <table>
-        <thead><tr><th>Час <span class="time-utc">(Київ / UTC)</span></th><th>Подія</th><th class="text-right">SOL ret 15хв</th><th class="text-right">BTC ret 15хв</th><th class="text-right">ETH ret 15хв</th><th class="text-center">Збіг з BTC</th></tr></thead>
-        <tbody id="cross-asset-tbody"><tr><td colspan="6"><span class="loading"></span></td></tr></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Час <span class="time-utc">(Київ / UTC)</span></th><th>Подія</th><th class="text-right">SOL ret 15хв</th><th class="text-right">BTC ret 15хв</th><th class="text-right">ETH ret 15хв</th><th class="text-center">Збіг з BTC</th></tr></thead>
+          <tbody id="cross-asset-tbody"><tr><td colspan="6"><span class="loading"></span></td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -489,7 +541,7 @@
       <div class="text-sm text-slate-500">Прогін paper-стратегії на історичних подіях</div>
     </div>
 
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <h2 class="section-title">⚙ Параметри прогону</h2>
       <div class="mb-3">
         <label class="text-xs text-slate-400">Шаблон</label>
@@ -509,49 +561,53 @@
       </div>
 
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div><label class="text-xs text-slate-400">Днів назад (порожнє = всі)</label><input type="number" id="bt-days" placeholder="всі" min="1" max="365" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
-        <div><label class="text-xs text-slate-400">Hit Rate threshold, %</label><input type="number" id="bt-hit-rate" value="60" min="0" max="100" step="5" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
-        <div><label class="text-xs text-slate-400">Min |ret_15m|, %</label><input type="number" id="bt-min-move" value="0.30" min="0" max="10" step="0.05" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
-        <div><label class="text-xs text-slate-400">Min events для trust</label><input type="number" id="bt-min-events" value="1" min="1" max="50" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
+        <div><label class="text-xs text-slate-400">Днів назад</label><input type="number" id="bt-days" placeholder="всі" min="1" max="365" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
+        <div><label class="text-xs text-slate-400">Hit Rate %</label><input type="number" id="bt-hit-rate" value="60" min="0" max="100" step="5" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
+        <div><label class="text-xs text-slate-400">Min |ret_15m| %</label><input type="number" id="bt-min-move" value="0.30" min="0" max="10" step="0.05" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
+        <div><label class="text-xs text-slate-400">Min events</label><input type="number" id="bt-min-events" value="1" min="1" max="50" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
         <div><label class="text-xs text-slate-400">Символи</label><input type="text" id="bt-symbols" value="SOLUSDT,BTCUSDT" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
         <div><label class="text-xs text-slate-400">Exit offset, хв</label><input type="number" id="bt-exit-offset" value="60" min="1" max="240" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
         <div><label class="text-xs text-slate-400">Розмір, $</label><input type="number" id="bt-size-usd" value="10" min="1" max="1000" step="1" class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm"></div>
-        <div class="flex items-end"><label class="flex items-center gap-2 text-sm"><input type="checkbox" id="bt-long-only" checked class="w-4 h-4"><span>SPOT LONG-only</span></label></div>
+        <div class="flex items-end"><label class="flex items-center gap-2 text-sm"><input type="checkbox" id="bt-long-only" checked class="w-4 h-4"><span>LONG-only</span></label></div>
       </div>
-      <div class="flex gap-2 mt-4">
-        <button onclick="runBacktest()" id="bt-run-btn" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded text-sm font-semibold">▶ Запустити backtest</button>
+      <div class="flex gap-2 mt-4 flex-wrap">
+        <button onclick="runBacktest()" id="bt-run-btn" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded text-sm font-semibold">▶ Запустити</button>
         <button onclick="clearBacktest()" class="px-4 py-2 bg-red-700 hover:bg-red-600 rounded text-sm">🗑 Очистити</button>
       </div>
     </div>
 
-    <div class="card p-4 mb-6" id="bt-summary-card" style="display:none">
+    <div class="card p-4 mb-4" id="bt-summary-card" style="display:none">
       <h2 class="section-title">📊 Підсумок</h2>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="bt-summary"></div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4" id="bt-summary-2"></div>
     </div>
 
-    <div class="card p-4 mb-6" id="bt-skips-card" style="display:none">
+    <div class="card p-4 mb-4" id="bt-skips-card" style="display:none">
       <h2 class="section-title">🚫 Причини skip</h2>
       <div id="bt-skips"></div>
     </div>
 
-    <div class="card p-4 mb-6" id="bt-by-symbol-card" style="display:none">
+    <div class="card p-4 mb-4" id="bt-by-symbol-card" style="display:none">
       <h2 class="section-title">📈 По символах</h2>
-      <table>
-        <thead><tr><th>Символ</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
-        <tbody id="bt-by-symbol-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Символ</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
+          <tbody id="bt-by-symbol-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="card p-4 mb-6" id="bt-by-direction-card" style="display:none">
+    <div class="card p-4 mb-4" id="bt-by-direction-card" style="display:none">
       <h2 class="section-title">📊 По напрямках</h2>
-      <table>
-        <thead><tr><th>Напрямок</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
-        <tbody id="bt-by-direction-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Напрямок</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
+          <tbody id="bt-by-direction-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="card p-4 mb-6" id="bt-equity-card" style="display:none">
+    <div class="card p-4 mb-4" id="bt-equity-card" style="display:none">
       <h2 class="section-title">📈 Equity curve</h2>
       <canvas id="bt-equity-chart" height="80"></canvas>
       <div class="hint mt-2" id="bt-equity-hint"></div>
@@ -559,27 +615,29 @@
 
     <div class="card p-4" id="bt-trades-card" style="display:none">
       <h2 class="section-title">📋 Угоди</h2>
-      <table>
-        <thead><tr><th>Час <span class="time-utc">(Київ / UTC)</span></th><th>Подія</th><th>Символ</th><th class="text-center">Напрямок</th><th class="text-right">Entry</th><th class="text-right">Exit</th><th class="text-right">P&L</th><th class="text-right">P&L %</th></tr></thead>
-        <tbody id="bt-trades-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Час <span class="time-utc">(Київ / UTC)</span></th><th>Подія</th><th>Символ</th><th class="text-center">Напрямок</th><th class="text-right">Entry</th><th class="text-right">Exit</th><th class="text-right">P&L</th><th class="text-right">P&L %</th></tr></thead>
+          <tbody id="bt-trades-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <!-- ==================== NAIVE (тупо тест) ==================== -->
+  <!-- ==================== NAIVE ==================== -->
   <div id="tab-naive" style="display:none">
     <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold">🎲 "Тупо тест"</h1>
       <div class="text-sm text-slate-500">
-        Угода на КОЖНУ high-подію. Голосування напрямку, якщо в одну хвилину кілька подій.
+        Угода на КОЖНУ high-подію.
       </div>
     </div>
 
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <h2 class="section-title">⚙ Параметри</h2>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
-          <label class="text-xs text-slate-400">Днів назад (порожнє = всі)</label>
+          <label class="text-xs text-slate-400">Днів назад</label>
           <input type="number" id="nv-days" placeholder="всі" min="1" max="3650"
                  class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
         </div>
@@ -589,7 +647,7 @@
                  class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
         </div>
         <div>
-          <label class="text-xs text-slate-400">Розмір угоди, $</label>
+          <label class="text-xs text-slate-400">Розмір, $</label>
           <input type="number" id="nv-size" value="10" min="1" max="1000" step="1"
                  class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
         </div>
@@ -599,50 +657,54 @@
                  class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
         </div>
       </div>
-      <div class="flex gap-2 mt-4">
+      <div class="flex gap-2 mt-4 flex-wrap">
         <button onclick="runNaive()" id="nv-run-btn"
                 class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded text-sm font-semibold">
           ▶ Запустити тест
         </button>
         <button onclick="clearNaive()"
                 class="px-4 py-2 bg-red-700 hover:bg-red-600 rounded text-sm">
-          🗑 Очистити результати
+          🗑 Очистити
         </button>
       </div>
       <div class="hint mt-2">
-        Фіксовані $10 / угоду. LONG + SHORT. Вхід T+1, вихід T+60. Голосування по expected_dir з expected.py.
+        Фіксовані $10 / угоду. LONG + SHORT. Вхід T+1, вихід T+60. Голосування по expected_dir.
         Рівність голосів = пропуск. Комісія 0.1% + slippage 0.05%.
       </div>
     </div>
 
-    <div class="card p-4 mb-6" id="nv-summary-card" style="display:none">
+    <div class="card p-4 mb-4" id="nv-summary-card" style="display:none">
       <h2 class="section-title">📊 Підсумок</h2>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="nv-summary"></div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4" id="nv-summary-2"></div>
     </div>
 
-    <div class="card p-4 mb-6" id="nv-skips-card" style="display:none">
+    <div class="card p-4 mb-4" id="nv-skips-card" style="display:none">
       <h2 class="section-title">📈 Деталі прогону</h2>
       <div id="nv-skips"></div>
     </div>
 
-    <div class="card p-4 mb-6" id="nv-by-symbol-card" style="display:none">
+    <div class="card p-4 mb-4" id="nv-by-symbol-card" style="display:none">
       <h2 class="section-title">📊 По символах</h2>
-      <table>
-        <thead><tr><th>Символ</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
-        <tbody id="nv-by-symbol-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Символ</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
+          <tbody id="nv-by-symbol-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="card p-4 mb-6" id="nv-by-direction-card" style="display:none">
+    <div class="card p-4 mb-4" id="nv-by-direction-card" style="display:none">
       <h2 class="section-title">📊 По напрямках</h2>
-      <table>
-        <thead><tr><th>Напрямок</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
-        <tbody id="nv-by-direction-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Напрямок</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
+          <tbody id="nv-by-direction-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="card p-4 mb-6" id="nv-equity-card" style="display:none">
+    <div class="card p-4 mb-4" id="nv-equity-card" style="display:none">
       <h2 class="section-title">📈 Equity curve</h2>
       <canvas id="nv-equity-chart" height="80"></canvas>
       <div class="hint mt-2" id="nv-equity-hint"></div>
@@ -650,20 +712,22 @@
 
     <div class="card p-4" id="nv-trades-card" style="display:none">
       <h2 class="section-title">📋 Угоди</h2>
-      <table>
-        <thead><tr>
-          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
-          <th>Подія</th>
-          <th>Символ</th>
-          <th class="text-center">Напрямок</th>
-          <th class="text-center">Голоси</th>
-          <th class="text-right">Entry</th>
-          <th class="text-right">Exit</th>
-          <th class="text-right">P&L</th>
-          <th class="text-right">P&L %</th>
-        </tr></thead>
-        <tbody id="nv-trades-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Час <span class="time-utc">(Київ / UTC)</span></th>
+            <th>Подія</th>
+            <th>Символ</th>
+            <th class="text-center">Напрямок</th>
+            <th class="text-center">Голоси</th>
+            <th class="text-right">Entry</th>
+            <th class="text-right">Exit</th>
+            <th class="text-right">P&L</th>
+            <th class="text-right">P&L %</th>
+          </tr></thead>
+          <tbody id="nv-trades-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -676,8 +740,7 @@
       </div>
     </div>
 
-    <!-- Статус + баланс -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
       <div class="card p-4">
         <div class="text-sm text-slate-400">LIVE статус</div>
         <div class="text-2xl font-bold" id="live-status-text">—</div>
@@ -700,8 +763,7 @@
       </div>
     </div>
 
-    <!-- Управління -->
-    <div class="card p-4 mb-6">
+    <div class="card p-4 mb-4">
       <h2 class="section-title">⚙ Управління</h2>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
@@ -726,41 +788,199 @@
         </div>
         <div>
           <label class="text-xs text-slate-400 block mb-1">Дії</label>
-          <button onclick="runLiveEngine()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm w-full mb-1">▶ Запустити engine вручну</button>
+          <button onclick="runLiveEngine()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm w-full mb-1">▶ Запустити вручну</button>
           <button onclick="clearLive()" class="px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm w-full">🗑 Очистити live_trades</button>
         </div>
       </div>
     </div>
 
-    <!-- Угоди -->
     <div class="card p-4" id="live-trades-card" style="display:none">
       <h2 class="section-title">📋 Live угоди</h2>
-      <table>
-        <thead><tr>
-          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
-          <th>Подія</th>
-          <th>Символ</th>
-          <th class="text-center">Напрямок</th>
-          <th class="text-center">Голоси</th>
-          <th class="text-right">Розмір</th>
-          <th class="text-right">Entry</th>
-          <th class="text-center">Статус</th>
-          <th class="text-right">Order ID</th>
-        </tr></thead>
-        <tbody id="live-trades-tbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Час <span class="time-utc">(Київ / UTC)</span></th>
+            <th>Подія</th>
+            <th>Символ</th>
+            <th class="text-center">Напрямок</th>
+            <th class="text-center">Голоси</th>
+            <th class="text-right">Розмір</th>
+            <th class="text-right">Entry</th>
+            <th class="text-center">Статус</th>
+            <th class="text-right">Order ID</th>
+          </tr></thead>
+          <tbody id="live-trades-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="card p-4 mt-6" id="live-empty-card">
+    <div class="card p-4 mt-4" id="live-empty-card">
       <div class="text-slate-500 text-center">Немає live-угод. Увімкни LIVE і дочекайся наступної high-події.</div>
+    </div>
+  </div>
+
+  <!-- ==================== TOOLS ==================== -->
+  <div id="tab-tools" style="display:none">
+    <h1 class="text-2xl font-bold mb-4">🔧 Інструменти</h1>
+
+    <!-- Управління -->
+    <div class="card p-4 mb-4">
+      <h2 class="section-title">⚙ Управління</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">⟳ Перерахувати impact</div>
+          <div class="hint mb-2">Перерахувати вплив для всіх минулих подій.</div>
+          <div class="flex gap-2 items-center flex-wrap">
+            <label class="text-xs text-slate-400">Limit:</label>
+            <input type="number" id="tool-impact-limit" value="1000" min="1" max="10000"
+                   class="w-24 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <button onclick="toolRecomputeImpact()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
+          </div>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">▶ Запустити paper engine</div>
+          <div class="hint mb-2">Перевірити нові події та відкрити віртуальні угоди.</div>
+          <button onclick="toolRunPaper()" class="mt-2 px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Запустити</button>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📥 Довантажити свічки</div>
+          <div class="hint mb-2">Завантажити історичні свічки через REST Bybit.</div>
+          <div class="flex gap-2 items-center flex-wrap">
+            <label class="text-xs text-slate-400">Днів:</label>
+            <input type="number" id="tool-history-days" value="2" min="1" max="90"
+                   class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <button onclick="toolLoadHistory()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+          </div>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📅 Оновити календар (today)</div>
+          <div class="hint mb-2">Парсити ForexFactory за сьогодні.</div>
+          <button onclick="toolRefreshCalendar()" class="mt-2 px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Парсити today</button>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📅 Завантажити тиждень</div>
+          <div class="hint mb-2">Завантажити this/last/next тиждень з ForexFactory.</div>
+          <div class="flex gap-2 items-center flex-wrap">
+            <select id="tool-calendar-week" class="px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+              <option value="this">this</option>
+              <option value="last">last</option>
+              <option value="next">next</option>
+            </select>
+            <button onclick="toolLoadCalendarWeek()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Завантажити</button>
+          </div>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">🔥 Найближчі high події</div>
+          <div class="hint mb-2">Показати всі high-importance події у наступні 7 днів.</div>
+          <button onclick="toolShowUpcoming()" class="mt-2 px-3 py-1 bg-amber-700 hover:bg-amber-600 rounded text-sm">Показати</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Результат останньої дії -->
+    <div class="card p-4 mb-4" id="tools-result-card" style="display:none">
+      <h2 class="section-title">
+        📋 Результат останньої дії
+        <button onclick="hideToolsResult()" class="text-xs text-slate-500 hover:text-slate-300 ml-auto">✕</button>
+      </h2>
+      <pre id="tools-result" class="text-xs font-mono text-slate-300 bg-slate-900 p-3 rounded overflow-auto max-h-96"></pre>
+    </div>
+
+    <!-- Найближчі high події -->
+    <div class="card p-4 mb-4" id="tools-upcoming-card" style="display:none">
+      <h2 class="section-title">🔥 Найближчі high події</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Час (Київ / UTC)</th>
+            <th>Вал.</th>
+            <th>Подія</th>
+            <th class="text-right">Forecast</th>
+            <th class="text-right">Previous</th>
+          </tr></thead>
+          <tbody id="tools-upcoming-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Діагностика -->
+    <div class="card p-4 mb-4">
+      <h2 class="section-title">🩺 Діагностика</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📊 Статистика БД</div>
+          <div class="hint mb-2">Кількість подій, свічок, impact, угод + баланс.</div>
+          <button onclick="toolDbStats()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">💾 Розмір БД</div>
+          <div class="hint mb-2">Таблиці, кількість рядків, розміри у МБ.</div>
+          <button onclick="toolDbTables()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+          <div id="db-tables-result" class="mt-3"></div>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">📋 Логи сервісу</div>
+          <div class="hint mb-2">Останні N рядків journalctl. Можна фільтрувати по grep.</div>
+          <div class="flex gap-2 items-center mt-2 flex-wrap">
+            <input type="number" id="tool-logs-lines" value="100" min="10" max="500"
+                   class="w-20 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm" placeholder="N">
+            <input type="text" id="tool-logs-grep" placeholder="grep (опційно)"
+                   class="w-40 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <button onclick="toolLogs()" class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+          </div>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">🔍 Діагностика impact</div>
+          <div class="hint mb-2">Розбивка impact по hit і importance.</div>
+          <button onclick="toolDiagnostics()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div class="font-semibold mb-1">💰 Діагностика paper</div>
+          <div class="hint mb-2">Чому engine не відкриває угоди: price_t1/t60, candidates, вікно входу.</div>
+          <button onclick="toolPaperDiagnostics()" class="mt-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">Показати</button>
+        </div>
+
+        <div class="bg-slate-800/50 p-3 rounded border border-slate-700 md:col-span-2">
+          <div class="font-semibold mb-1">📤 Експорт CSV</div>
+          <div class="hint mb-2">Завантажити події або угоди у CSV.</div>
+          <div class="flex gap-2 mt-2 flex-wrap">
+            <button onclick="window.location.href='/events/export.csv?days_back=30'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Події</button>
+            <button onclick="window.location.href='/paper/trades/export.csv'" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">📤 Угоди</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Небезпечні дії -->
+    <div class="card p-4 mb-4 border-red-900">
+      <h2 class="section-title text-red-400">⚠ Небезпечні дії</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="bg-red-950/30 p-3 rounded border border-red-900">
+          <div class="font-semibold mb-1 text-red-300">🗑 Очистити impact</div>
+          <div class="hint mb-2">Видалити всі записи з event_impact.</div>
+          <button onclick="toolClearImpact()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">🗑 Очистити</button>
+        </div>
+        <div class="bg-red-950/30 p-3 rounded border border-red-900">
+          <div class="font-semibold mb-1 text-red-300">↺ Скинути paper акаунт</div>
+          <div class="hint mb-2">Скинути баланс до $100 і видалити всі угоди.</div>
+          <button onclick="toolResetPaper()" class="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm">↺ Скинути</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <!-- ==================== HELP ==================== -->
   <div id="tab-help" style="display:none">
-    <h1 class="text-2xl font-bold mb-6">Довідка</h1>
+    <h1 class="text-2xl font-bold mb-4">Довідка</h1>
 
-    <div class="card p-6 mb-4">
+    <div class="card p-4 mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">🎲 "Тупо тест"</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
         Симуляція "що було б, якби я торгував на КОЖНУ high-подію".<br>
@@ -774,8 +994,8 @@
       </p>
     </div>
 
-    <div class="card p-6 mb-4">
-      <h2 class="text-lg font-semibold text-cyan-400 mb-3">💰 Paper Trading (окремо)</h2>
+    <div class="card p-4 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">💰 Paper Trading</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
         SPOT + LONG-only. Фільтри: importance=high, hit=HIT/MISS, hit_rate≥60%, |ret_15m|≥0.3%.<br>
         Вхід: close T+1 (вікно T+1..T+30). Вихід: close T+60. Розмір: $10 за угоду.<br>
@@ -783,7 +1003,7 @@
       </p>
     </div>
 
-    <div class="card p-6">
+    <div class="card p-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Про час</h2>
       <p class="text-slate-300 text-sm leading-relaxed">
         Усі розрахунки ведуться в <b>UTC</b>. У веб-інтерфейсі — <b>Europe/Kyiv</b>, UTC у дужках.
@@ -792,11 +1012,11 @@
   </div>
 </main>
 
-<div id="modal" style="display:none" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-  <div class="card p-6 max-w-2xl w-full max-h-[90vh] overflow-auto">
+<div id="modal" style="display:none" class="fixed inset-0 bg-black/70 flex items-center justify-center p-3 z-50">
+  <div class="card p-5 max-w-2xl w-full max-h-[95vh] overflow-auto">
     <div class="flex justify-between mb-4">
       <h2 id="modal-title" class="text-xl font-bold"></h2>
-      <button onclick="closeModal()" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-white text-2xl leading-none px-2">&times;</button>
     </div>
     <div id="modal-body"></div>
   </div>
@@ -843,11 +1063,13 @@ function fmtStatLast(tsStr) {
   return `${local} <span class="time-utc">(${utc} UTC)</span>`;
 }
 
+// ===== TABS =====
+const ALL_TABS = ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','naive','live-trading','help'];
 document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','naive','help'].forEach(name => {
+    ALL_TABS.forEach(name => {
       const el = document.getElementById('tab-' + name);
       if (el) el.style.display = name === t.dataset.tab ? '' : 'none';
     });
@@ -860,6 +1082,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
     if (t.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
     if (t.dataset.tab === 'naive') { loadNaiveTrades(); loadNaiveEquity(); }
+    if (t.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); }
   };
 });
 
@@ -950,10 +1173,10 @@ function renderLiveCard(item) {
   const isPast = item.seconds_since > 0;
   const timing = isPast ? `T+${fmtSeconds(item.seconds_since)}` : `через ${fmtSeconds(item.seconds_to)}`;
   const sym = (label, data) => {
-    if (!data) return `<div class="flex-1 min-w-[140px]"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-lg font-mono text-slate-600">—</div></div>`;
+    if (!data) return `<div class="flex-1 min-w-[100px]"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-lg font-mono text-slate-600">—</div></div>`;
     const cls = data.ret_pct > 0.05 ? 'up' : data.ret_pct < -0.05 ? 'down' : 'flat';
     const arrow = data.ret_pct > 0.05 ? '↑' : data.ret_pct < -0.05 ? '↓' : '→';
-    return `<div class="flex-1 min-w-[140px]">
+    return `<div class="flex-1 min-w-[100px]">
       <div class="text-xs text-slate-500 mb-1">${label}</div>
       <div class="text-lg font-mono">$${data.current.toFixed(4)}</div>
       <div class="text-sm font-mono ${cls}">${arrow} ${data.ret_pct >= 0 ? '+' : ''}${data.ret_pct.toFixed(3)}%</div>
@@ -963,11 +1186,11 @@ function renderLiveCard(item) {
     <div class="flex justify-between items-start mb-3 flex-wrap gap-2">
       <div>
         <div class="text-lg font-semibold">${impEmoji} ${ev.title}</div>
-        <div class="text-sm text-slate-400">${ev.country} · ${fmtBoth(ev.time_utc)} · Forecast: <span class="font-mono">${ev.forecast_value || '—'}</span> · Actual: <span class="font-mono">${ev.actual_value || '—'}</span></div>
+        <div class="text-sm text-slate-400">${ev.country} · ${fmtBoth(ev.time_utc)} · F: <span class="font-mono">${ev.forecast_value || '—'}</span> · A: <span class="font-mono">${ev.actual_value || '—'}</span></div>
       </div>
       <div class="text-right"><div class="text-2xl font-mono ${isPast ? 'text-cyan-400' : 'text-slate-400'}">${timing}</div></div>
     </div>
-    <div class="flex gap-4 flex-wrap">
+    <div class="flex gap-3 flex-wrap">
       ${sym('SOLUSDT', item.symbols.SOLUSDT)}
       ${sym('BTCUSDT', item.symbols.BTCUSDT)}
       ${sym('ETHUSDT', item.symbols.ETHUSDT)}
@@ -1095,9 +1318,9 @@ async function loadPriceChart(hours = null) {
     { label: 'SOLUSDT', data: prices, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, tension: 0.2, pointRadius: 0, fill: true, order: 5 },
     { label: 'High', data: markersByLevel.high.map(m => ({ x: labels[m.idx], y: prices[m.idx] })), backgroundColor: '#dc2626', borderColor: '#fff', borderWidth: 1, pointRadius: 6, pointHoverRadius: 10, showLine: false, order: 4 },
     { label: 'Medium', data: markersByLevel.medium.map(m => ({ x: labels[m.idx], y: prices[m.idx] })), backgroundColor: '#f59e0b', borderColor: '#fff', borderWidth: 1, pointRadius: 4, pointHoverRadius: 8, showLine: false, order: 4 },
-    { label: 'LONG entry', data: longEntries, backgroundColor: '#22c55e', borderColor: '#ffffff', borderWidth: 1.5, pointRadius: 9, pointHoverRadius: 13, pointStyle: 'triangle', rotation: 0, showLine: false, order: 1 },
-    { label: 'SHORT entry', data: shortEntries, backgroundColor: '#ef4444', borderColor: '#ffffff', borderWidth: 1.5, pointRadius: 9, pointHoverRadius: 13, pointStyle: 'triangle', rotation: 180, showLine: false, order: 1 },
-    { label: 'Exit', data: exits.map(p => ({ x: p.x, y: p.y })), backgroundColor: exits.map(p => (p.pnl >= 0 ? '#22c55e' : '#ef4444')), borderColor: '#ffffff', borderWidth: 1.5, pointRadius: 8, pointHoverRadius: 12, pointStyle: 'rectRot', showLine: false, order: 2 },
+    { label: 'LONG entry', data: longEntries, backgroundColor: '#22c55e', borderColor: '#ffffff', borderWidth: 1.5, pointRadius: 8, pointHoverRadius: 12, pointStyle: 'triangle', rotation: 0, showLine: false, order: 1 },
+    { label: 'SHORT entry', data: shortEntries, backgroundColor: '#ef4444', borderColor: '#ffffff', borderWidth: 1.5, pointRadius: 8, pointHoverRadius: 12, pointStyle: 'triangle', rotation: 180, showLine: false, order: 1 },
+    { label: 'Exit', data: exits.map(p => ({ x: p.x, y: p.y })), backgroundColor: exits.map(p => (p.pnl >= 0 ? '#22c55e' : '#ef4444')), borderColor: '#ffffff', borderWidth: 1.5, pointRadius: 7, pointHoverRadius: 11, pointStyle: 'rectRot', showLine: false, order: 2 },
   ];
   if (priceChart) priceChart.destroy();
   priceChart = new Chart(document.getElementById('price-chart'), {
@@ -1130,7 +1353,7 @@ async function loadPriceChart(hours = null) {
         if (evs.length > 0) openEvent(evs[0].id);
       },
       scales: {
-        x: { ticks: { color: '#94a3b8', maxTicksLimit: 12, autoSkip: true }, grid: { color: '#334155' }, title: { display: true, text: 'Час (Київ)', color: '#94a3b8' } },
+        x: { ticks: { color: '#94a3b8', maxTicksLimit: 8, autoSkip: true }, grid: { color: '#334155' }, title: { display: true, text: 'Час (Київ)', color: '#94a3b8' } },
         y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'Ціна, USD', color: '#94a3b8' } },
       }
     }
@@ -1172,10 +1395,10 @@ async function loadDashboard() {
     document.getElementById('hit-rate-card').style.display = '';
     const rate = denom > 0 ? (o.hits / denom * 100) : null;
     document.getElementById('hit-rate-summary').innerHTML = `
-      <div><div class="text-sm text-slate-400">Hit Rate (SOL)</div><div class="text-3xl font-mono ${rate == null ? 'flat' : rate >= 60 ? 'up' : rate <= 40 ? 'down' : 'flat'}">${rate == null ? '—' : rate.toFixed(1) + '%'}</div><div class="hint">${denom > 0 ? `HIT/(HIT+MISS), n=${denom}` : 'Немає даних'}</div></div>
-      <div><div class="text-sm text-slate-400">HIT</div><div class="text-3xl font-mono up">${o.hits || 0}</div></div>
-      <div><div class="text-sm text-slate-400">MISS</div><div class="text-3xl font-mono down">${o.misses || 0}</div></div>
-      <div><div class="text-sm text-slate-400">NEUTRAL / NO_DATA</div><div class="text-3xl font-mono flat">${(o.neutrals||0)} / ${(o.no_data||0)}</div></div>
+      <div><div class="text-sm text-slate-400">Hit Rate</div><div class="text-2xl font-mono ${rate == null ? 'flat' : rate >= 60 ? 'up' : rate <= 40 ? 'down' : 'flat'}">${rate == null ? '—' : rate.toFixed(1) + '%'}</div><div class="hint">${denom > 0 ? `n=${denom}` : '—'}</div></div>
+      <div><div class="text-sm text-slate-400">HIT</div><div class="text-2xl font-mono up">${o.hits || 0}</div></div>
+      <div><div class="text-sm text-slate-400">MISS</div><div class="text-2xl font-mono down">${o.misses || 0}</div></div>
+      <div><div class="text-sm text-slate-400">NEUTRAL / N/A</div><div class="text-2xl font-mono flat">${(o.neutrals||0)} / ${(o.no_data||0)}</div></div>
     `;
   }
   if (istats.overall && istats.overall.n) {
@@ -1185,7 +1408,7 @@ async function loadDashboard() {
       ${metric('Avg +15хв', fmtPct(o.avg_15m), clsFor(o.avg_15m), '')}
       ${metric('Avg +30хв', fmtPct(o.avg_30m), clsFor(o.avg_30m), '')}
       ${metric('Avg +60хв', fmtPct(o.avg_60m), clsFor(o.avg_60m), '')}
-      ${metric('Up/Down/Flat (n=' + o.n + ')', `<span class="up">${o.up_15m||0}</span> / <span class="down">${o.down_15m||0}</span> / <span class="flat">${o.flat_15m||0}</span>`, '', '')}
+      ${metric('U/D/F (n=' + o.n + ')', `<span class="up">${o.up_15m||0}</span> / <span class="down">${o.down_15m||0}</span> / <span class="flat">${o.flat_15m||0}</span>`, '', '')}
     `;
   }
   try { const acc = await api('/paper/account'); if (!acc.error) { const el = document.getElementById('nav-equity'); el.textContent = fmtUsd(acc.equity); el.className = 'equity-badge tip ' + clsFor(acc.total_pnl); } } catch (_) {}
@@ -1247,13 +1470,13 @@ async function loadImpact() {
   const denom = (o.hits||0) + (o.misses||0);
   const rateVal = denom > 0 ? (o.hits / denom * 100) : null;
   document.getElementById('impact-overall').innerHTML = o.n ? `
-    <div class="grid grid-cols-2 md:grid-cols-7 gap-4">
-      ${metric('Всього (n)', o.n, '', '')}
+    <div class="grid grid-cols-2 md:grid-cols-7 gap-3">
+      ${metric('Всього', o.n, '', '')}
       ${metric('Hit Rate', rateVal == null ? '—' : rateVal.toFixed(1) + '%', rateVal == null ? 'flat' : rateVal >= 50 ? 'up' : 'down', '')}
       ${metric('HIT', o.hits||0, 'up', '')}
       ${metric('MISS', o.misses||0, 'down', '')}
       ${metric('NEUTRAL', o.neutrals||0, 'flat', '')}
-      ${metric('NO_DATA', o.no_data||0, 'flat', '')}
+      ${metric('N/A', o.no_data||0, 'flat', '')}
       ${metric('Avg +15хв', fmtPct(o.avg_15m), clsFor(o.avg_15m), '')}
     </div>
   ` : '<p class="text-slate-500">Немає даних</p>';
@@ -1280,7 +1503,7 @@ async function loadImpact() {
   if (rows.length > 0) {
     hitChart = new Chart(document.getElementById('hit-chart'), {
       type: 'bar',
-      data: { labels: rows.map(r => r.title.length > 35 ? r.title.slice(0, 35) + '…' : r.title),
+      data: { labels: rows.map(r => r.title.length > 30 ? r.title.slice(0, 30) + '…' : r.title),
         datasets: [
           { label: 'HIT', data: rows.map(r => r.hits || 0), backgroundColor: '#22c55e' },
           { label: 'MISS', data: rows.map(r => r.misses || 0), backgroundColor: '#ef4444' },
@@ -1296,15 +1519,15 @@ async function loadPaper() {
   if (!acc.error) {
     document.getElementById('paper-initial').textContent = fmtUsd(acc.initial_balance);
     document.getElementById('paper-equity').textContent = fmtUsd(acc.equity);
-    document.getElementById('paper-equity').className = 'text-3xl font-bold font-mono ' + clsFor(acc.total_pnl);
-    document.getElementById('paper-equity-hint').textContent = `Balance ${fmtUsd(acc.balance)} + frozen ${fmtUsd(acc.frozen)}`;
+    document.getElementById('paper-equity').className = 'text-2xl font-bold font-mono ' + clsFor(acc.total_pnl);
+    document.getElementById('paper-equity-hint').textContent = `B ${fmtUsd(acc.balance)} + F ${fmtUsd(acc.frozen)}`;
     const pnlSign = acc.total_pnl >= 0 ? '+' : '';
     document.getElementById('paper-pnl').textContent = `${pnlSign}${fmtUsd(acc.total_pnl)}`;
-    document.getElementById('paper-pnl').className = 'text-3xl font-bold font-mono ' + clsFor(acc.total_pnl);
+    document.getElementById('paper-pnl').className = 'text-2xl font-bold font-mono ' + clsFor(acc.total_pnl);
     document.getElementById('paper-pnl-pct').textContent = `${pnlSign}${acc.total_pnl_pct.toFixed(3)}%`;
     document.getElementById('paper-winrate').textContent = acc.win_rate == null ? '—' : acc.win_rate.toFixed(1) + '%';
-    document.getElementById('paper-winrate').className = 'text-3xl font-bold font-mono ' + (acc.win_rate == null ? 'flat' : acc.win_rate >= 50 ? 'up' : 'down');
-    document.getElementById('paper-trades-count').textContent = `${acc.total_trades} угод (${acc.closed_trades} закр.)`;
+    document.getElementById('paper-winrate').className = 'text-2xl font-bold font-mono ' + (acc.win_rate == null ? 'flat' : acc.win_rate >= 50 ? 'up' : 'down');
+    document.getElementById('paper-trades-count').textContent = `${acc.total_trades} (${acc.closed_trades} закр.)`;
     document.getElementById('paper-open').textContent = acc.open_trades;
     document.getElementById('paper-closed').textContent = acc.closed_trades;
     document.getElementById('paper-wins').textContent = acc.wins;
@@ -1332,12 +1555,12 @@ async function loadPaper() {
   if (curve.length === 0) {
     document.getElementById('equity-hint').textContent = 'Очікування першої закритої угоди…';
   } else {
-    document.getElementById('equity-hint').textContent = `${curve.length} закритих угод, фінальний cumulative: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
+    document.getElementById('equity-hint').textContent = `${curve.length} угод, фінал: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
     const labels = curve.map(p => { const d = new Date(p.ts.replace(' ', 'T') + 'Z'); return d.toLocaleString('uk-UA', { timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', ''); });
     const data = curve.map(p => p.cum_pnl);
     equityChart = new Chart(document.getElementById('equity-chart'), {
       type: 'line', data: { labels, datasets: [{ label: 'Cumulative P&L, $', data, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, tension: 0.2, pointRadius: 3, fill: true }] },
-      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
+      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 8 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
     });
   }
   const trades = await api('/paper/trades?limit=100');
@@ -1427,8 +1650,8 @@ async function loadCalendar() {
     const d = new Date(dayEvents[0].time_utc);
     const dayLabel = d.toLocaleDateString('uk-UA', { timeZone: LOCAL_TZ, weekday: 'long', day: 'numeric', month: 'long' });
     const isToday = day === todayKey;
-    html += `<div class="mb-6">
-      <div class="flex items-center gap-3 mb-3">
+    html += `<div class="mb-4">
+      <div class="flex items-center gap-3 mb-2">
         <h2 class="text-lg font-semibold ${isToday ? 'text-cyan-400' : 'text-slate-200'}">${dayLabel}${isToday ? ' · сьогодні' : ''}</h2>
         <span class="text-xs text-slate-500">${dayEvents.length} подій</span>
       </div>
@@ -1436,11 +1659,11 @@ async function loadCalendar() {
         ${dayEvents.map(ev => {
           const localTime = new Date(ev.time_utc).toLocaleTimeString('uk-UA', { timeZone: LOCAL_TZ, hour: '2-digit', minute: '2-digit', hour12: false });
           const impColor = { high: 'border-l-red-500', medium: 'border-l-amber-500', low: 'border-l-slate-500' }[ev.importance] || 'border-l-slate-500';
-          return `<div class="flex items-center gap-4 px-3 py-2 bg-slate-800/40 rounded border-l-4 ${impColor} hover:bg-slate-800 cursor-pointer" onclick="openEvent(${ev.id})">
-            <span class="font-mono text-sm text-cyan-400 w-16">${localTime}</span>
+          return `<div class="flex items-center gap-3 px-3 py-2 bg-slate-800/40 rounded border-l-4 ${impColor} hover:bg-slate-800 cursor-pointer" onclick="openEvent(${ev.id})">
+            <span class="font-mono text-sm text-cyan-400 w-14">${localTime}</span>
             ${badge(ev.importance)}
-            <span class="font-mono text-xs text-slate-500 w-10">${ev.country}</span>
-            <span class="flex-1 text-slate-200">${ev.title}</span>
+            <span class="font-mono text-xs text-slate-500 w-8">${ev.country}</span>
+            <span class="flex-1 text-slate-200 text-sm">${ev.title}</span>
             ${ev.forecast_value ? `<span class="text-xs text-slate-500">fc: ${ev.forecast_value}</span>` : ''}
           </div>`;
         }).join('')}
@@ -1471,16 +1694,16 @@ async function loadHeatmap() {
   }
   let html = `<table style="border-collapse: separate; border-spacing: 2px;">`;
   html += `<tr><th style="padding:4px;font-size:0.7rem;color:#94a3b8;text-align:right">Київ →<br><span style="font-size:0.6rem">UTC ↓</span></th>`;
-  for (const h of hours) html += `<th style="padding:4px;font-size:0.65rem;color:#94a3b8;text-align:center">${kyivHourLabel(h)}</th>`;
+  for (const h of hours) html += `<th style="padding:4px;font-size:0.6rem;color:#94a3b8;text-align:center">${kyivHourLabel(h)}</th>`;
   html += `</tr>`;
   for (const d of [1,2,3,4,5,6,0]) {
-    html += `<tr><td style="padding:6px;font-size:0.75rem;color:#94a3b8;text-align:right;padding-right:8px">${days[d]}</td>`;
+    html += `<tr><td style="padding:4px;font-size:0.7rem;color:#94a3b8;text-align:right;padding-right:6px">${days[d]}</td>`;
     for (const h of hours) {
       const cell = idx[`${d}_${h}`];
       const avg = cell?.avg_15m ?? null;
       const bg = colorFor(avg);
       const text = avg != null ? avg.toFixed(1) : '';
-      html += `<td title="n=${cell?.n ?? 0}\nAvg +15хв: ${avg?.toFixed(3)}%" style="background:${bg};width:32px;height:28px;text-align:center;font-size:0.65rem;color:#fff;border-radius:3px;font-family:monospace">${text}</td>`;
+      html += `<td title="n=${cell?.n ?? 0}\nAvg +15хв: ${avg?.toFixed(3)}%" style="background:${bg};width:28px;height:26px;text-align:center;font-size:0.6rem;color:#fff;border-radius:3px;font-family:monospace">${text}</td>`;
     }
     html += `</tr>`;
   }
@@ -1492,12 +1715,12 @@ async function loadCrossAsset() {
   const sum = s.cross_asset_summary || {};
   const rows = s.cross_asset || [];
   document.getElementById('cross-asset-summary').innerHTML = `
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
       ${metric('Подій з BTC', sum.n_events || 0, '', '')}
-      ${metric('Збіг напрямку', sum.same_direction_as_btc || 0, 'up', '')}
+      ${metric('Збіг', sum.same_direction_as_btc || 0, 'up', '')}
       ${metric('Кореляція', (sum.correlation_pct ?? 0).toFixed(1) + '%', (sum.correlation_pct ?? 0) >= 70 ? 'up' : (sum.correlation_pct ?? 0) <= 40 ? 'down' : 'flat', '')}
-      ${metric('Avg SOL +15хв', fmtPct(sum.avg_sol_ret_15m), clsFor(sum.avg_sol_ret_15m), '')}
-      ${metric('Excess SOL vs BTC', fmtPct(sum.avg_excess_sol_vs_btc), clsFor(sum.avg_excess_sol_vs_btc), '')}
+      ${metric('Avg SOL', fmtPct(sum.avg_sol_ret_15m), clsFor(sum.avg_sol_ret_15m), '')}
+      ${metric('Excess SOL-BTC', fmtPct(sum.avg_excess_sol_vs_btc), clsFor(sum.avg_excess_sol_vs_btc), '')}
     </div>`;
   const tbody = document.getElementById('cross-asset-tbody');
   tbody.innerHTML = rows.map(r => {
@@ -1519,22 +1742,22 @@ async function openEvent(id) {
   const e = await api(`/event/${id}`);
   const i = await api(`/impact/event/${id}`).catch(() => null);
   document.getElementById('modal-title').textContent = e.title;
-  let body = `<div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-    <div><span class="text-slate-400">Час (Київ / UTC):</span> <span class="font-mono">${fmtBothFull(e.time_utc)}</span></div>
+  let body = `<div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 text-sm">
+    <div><span class="text-slate-400">Час:</span> <span class="font-mono">${fmtBothFull(e.time_utc)}</span></div>
     <div><span class="text-slate-400">Валюта:</span> <span class="font-mono">${e.country}</span></div>
-    <div><span class="text-slate-400">Важливість:</span> ${badge(e.importance)}</div>
-    <div><span class="text-slate-400">Forecast / Prev / Actual:</span> <span class="font-mono">${e.forecast_value||'—'} / ${e.previous_value||'—'} / ${e.actual_value||'—'}</span></div>
+    <div><span class="text-slate-400">Важл.:</span> ${badge(e.importance)}</div>
+    <div><span class="text-slate-400">F / P / A:</span> <span class="font-mono">${e.forecast_value||'—'} / ${e.previous_value||'—'} / ${e.actual_value||'—'}</span></div>
   </div>`;
   if (i && !i.error) {
     const hit = i.hit || 'NO_DATA';
-    body += `<div class="mb-3 p-3 rounded bg-slate-800 flex items-center gap-4 flex-wrap">
-      <div><span class="text-slate-400 text-sm">Очікуваний:</span> <span class="${clsForDir(i.expected_dir)} font-mono">${i.expected_dir || '—'}</span></div>
-      <div><span class="text-slate-400 text-sm">Фактичний (15хв):</span> <span class="${clsForDir(i.dir_15m)} font-mono">${i.dir_15m || '—'}</span></div>
+    body += `<div class="mb-3 p-2 rounded bg-slate-800 flex items-center gap-3 flex-wrap">
+      <div><span class="text-slate-400 text-sm">Очік.:</span> <span class="${clsForDir(i.expected_dir)} font-mono">${i.expected_dir || '—'}</span></div>
+      <div><span class="text-slate-400 text-sm">Факт:</span> <span class="${clsForDir(i.dir_15m)} font-mono">${i.dir_15m || '—'}</span></div>
       <div>${hitBadge(hit)}</div>
     </div>
     <h3 class="font-semibold mb-2">Вплив на ${i.symbol || 'SOLUSDT'}</h3>
-    <div class="text-xs text-slate-400 mb-2">Baseline (T-1): <span class="font-mono text-white">${fmtUsd4(i.price_baseline)}</span> · Поріг: <span class="font-mono text-white">${i.threshold_pct ? i.threshold_pct.toFixed(3) : '—'}%</span></div>
-    <table><thead><tr><th>Вікно</th><th class="text-right">Ціна</th><th class="text-right">Зміна</th><th class="text-right">Напрямок</th></tr></thead><tbody>`;
+    <div class="text-xs text-slate-400 mb-2">Baseline: <span class="font-mono text-white">${fmtUsd4(i.price_baseline)}</span> · Поріг: <span class="font-mono text-white">${i.threshold_pct ? i.threshold_pct.toFixed(3) : '—'}%</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Вікно</th><th class="text-right">Ціна</th><th class="text-right">Зміна</th><th class="text-right">Напрямок</th></tr></thead><tbody>`;
     for (const w of [1,5,15,30,60]) {
       body += `<tr>
         <td>T+${w}хв</td>
@@ -1543,7 +1766,7 @@ async function openEvent(id) {
         <td class="text-right ${clsForDir(i['dir_'+w+'m'])}">${i['dir_'+w+'m'] || '—'}</td>
       </tr>`;
     }
-    body += `</tbody></table>`;
+    body += `</tbody></table></div>`;
   } else { body += `<p class="text-slate-400">Вплив ще не розраховано.</p>`; }
   document.getElementById('modal-body').innerHTML = body;
   document.getElementById('modal').style.display = 'flex';
@@ -1633,7 +1856,7 @@ document.addEventListener('DOMContentLoaded', () => { const sel = document.getEl
 async function runBacktest() {
   const btn = document.getElementById('bt-run-btn');
   const originalText = btn.innerHTML;
-  btn.innerHTML = '⏳ Виконується...'; btn.disabled = true;
+  btn.innerHTML = '⏳...'; btn.disabled = true;
   const params = new URLSearchParams();
   const days = document.getElementById('bt-days').value.trim();
   if (days) params.set('days', days);
@@ -1713,13 +1936,13 @@ async function loadBacktestEquity() {
     const card = document.getElementById('bt-equity-card');
     if (curve.length === 0) { card.style.display = 'none'; return; }
     card.style.display = '';
-    document.getElementById('bt-equity-hint').textContent = `${curve.length} угод, фінальний cumulative: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
+    document.getElementById('bt-equity-hint').textContent = `${curve.length} угод, фінал: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
     const labels = curve.map(p => { const d = new Date(p.ts); return d.toLocaleString('uk-UA', { timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', ''); });
     const data = curve.map(p => p.cum_pnl);
     if (btEquityChart) btEquityChart.destroy();
     btEquityChart = new Chart(document.getElementById('bt-equity-chart'), {
       type: 'line', data: { labels, datasets: [{ label: 'Cumulative P&L, $', data, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, tension: 0.2, pointRadius: 3, fill: true }] },
-      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
+      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 8 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
     });
   } catch (e) {}
 }
@@ -1736,11 +1959,11 @@ async function loadLiveStatus() {
     const s = await api('/live/status');
     document.getElementById('live-status-text').textContent = s.live_enabled ? '🔴 УВІМКНЕНО' : '⏹ ВИМКНЕНО';
     document.getElementById('live-status-text').className = 'text-2xl font-bold ' + (s.live_enabled ? 'down' : 'flat');
-    document.getElementById('live-status-hint').textContent = s.live_enabled ? 'Реальні ордери відправляються' : 'Dry-run: тільки логування';
+    document.getElementById('live-status-hint').textContent = s.live_enabled ? 'Реальні ордери' : 'Dry-run';
     document.getElementById('live-balance').textContent = s.bybit.usdt_available != null ? '$' + s.bybit.usdt_available.toFixed(2) : '—';
     document.getElementById('live-balance-hint').textContent = s.bybit.error ? s.bybit.error : 'Available USDT';
     document.getElementById('live-size').textContent = '$' + s.trade_size_usd.toFixed(2);
-    document.getElementById('live-size-hint').textContent = 'Max ' + s.max_pct_of_balance + '% від балансу';
+    document.getElementById('live-size-hint').textContent = 'Max ' + s.max_pct_of_balance + '%';
     document.getElementById('live-keys').textContent = s.api_keys_configured ? '✓' : '✗';
     document.getElementById('live-keys').className = 'text-2xl font-bold ' + (s.api_keys_configured ? 'up' : 'down');
     document.getElementById('live-keys-hint').textContent = s.testnet ? 'Testnet' : 'Mainnet';
@@ -1748,7 +1971,7 @@ async function loadLiveStatus() {
   } catch (e) { console.error('loadLiveStatus failed', e); }
 }
 async function toggleLive(enabled) {
-  if (enabled && !confirm('⚠️ УВАГА! Увімкнути РЕАЛЬНУ торгівлю? Будуть відправлятися справжні ордери на Bybit.')) return;
+  if (enabled && !confirm('⚠️ УВАГА! Увімкнути РЕАЛЬНУ торгівлю?')) return;
   if (!enabled && !confirm('Вимкнути LIVE торгівлю?')) return;
   await api('/live/toggle', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled}) });
   loadLiveStatus();
@@ -1795,25 +2018,13 @@ async function loadLiveTrades() {
     }).join('');
   } catch (e) { console.error('loadLiveTrades failed', e); }
 }
-// Додати обробку табу:
-document.querySelector('.tab[data-tab="live-trading"]').onclick = () => {
-  document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
-  document.querySelector('.tab[data-tab="live-trading"]').classList.add('active');
-  ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','naive','live-trading','help'].forEach(name => {
-    const el = document.getElementById('tab-' + name);
-    if (el) el.style.display = name === 'live-trading' ? '' : 'none';
-  });
-  loadLiveStatus();
-  loadLiveTrades();
-};
 
-
-// ==================== NAIVE ("тупо тест") ====================
+// ==================== NAIVE ====================
 let nvEquityChart = null;
 async function runNaive() {
   const btn = document.getElementById('nv-run-btn');
   const originalText = btn.innerHTML;
-  btn.innerHTML = '⏳ Виконується...'; btn.disabled = true;
+  btn.innerHTML = '⏳...'; btn.disabled = true;
   const params = new URLSearchParams();
   const days = document.getElementById('nv-days').value.trim();
   if (days) params.set('days', days);
@@ -1840,7 +2051,7 @@ function renderNaiveResult(r) {
   `;
   document.getElementById('nv-summary-2').innerHTML = `
     ${metric('Total P&L', fmtUsd(s.total_pnl), clsFor(s.total_pnl), '')}
-    ${metric('Avg P&L / угоду', fmtUsd(s.avg_pnl), clsFor(s.avg_pnl), '')}
+    ${metric('Avg P&L', fmtUsd(s.avg_pnl), clsFor(s.avg_pnl), '')}
     ${metric('Старт $' + s.initial_balance.toFixed(0) + ' → Фінал', '$' + s.final_balance.toFixed(2), clsFor(s.total_pnl), '')}
     ${metric('P&L %', (s.total_pnl_pct >= 0 ? '+' : '') + s.total_pnl_pct.toFixed(2) + '%', clsFor(s.total_pnl_pct), '')}
   `;
@@ -1901,13 +2112,13 @@ async function loadNaiveEquity() {
     const card = document.getElementById('nv-equity-card');
     if (curve.length === 0) { card.style.display = 'none'; return; }
     card.style.display = '';
-    document.getElementById('nv-equity-hint').textContent = `${curve.length} угод, фінальний cumulative: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
+    document.getElementById('nv-equity-hint').textContent = `${curve.length} угод, фінал: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
     const labels = curve.map(p => { const d = new Date(p.ts); return d.toLocaleString('uk-UA', { timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', ''); });
     const data = curve.map(p => p.cum_pnl);
     if (nvEquityChart) nvEquityChart.destroy();
     nvEquityChart = new Chart(document.getElementById('nv-equity-chart'), {
       type: 'line', data: { labels, datasets: [{ label: 'Cumulative P&L, $', data, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, tension: 0.2, pointRadius: 3, fill: true }] },
-      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
+      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 8 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
     });
   } catch (e) {}
 }
@@ -1916,6 +2127,158 @@ async function clearNaive() {
   await api('/naive/clear', { method: 'POST' });
   ['nv-summary-card','nv-skips-card','nv-by-symbol-card','nv-by-direction-card','nv-equity-card','nv-trades-card'].forEach(id => document.getElementById(id).style.display = 'none');
   if (nvEquityChart) { nvEquityChart.destroy(); nvEquityChart = null; }
+}
+
+// ==================== TOOLS ====================
+function showToolsResult(label, data) {
+  const card = document.getElementById('tools-result-card');
+  const pre = document.getElementById('tools-result');
+  card.style.display = '';
+  const timestamp = new Date().toLocaleString('uk-UA', { timeZone: LOCAL_TZ });
+  pre.textContent = `[${timestamp}] ${label}\n\n${JSON.stringify(data, null, 2)}`;
+}
+function hideToolsResult() {
+  document.getElementById('tools-result-card').style.display = 'none';
+}
+async function toolRecomputeImpact() {
+  const limit = parseInt(document.getElementById('tool-impact-limit').value) || 1000;
+  showToolsResult(`⟳ impact (limit=${limit})`, { loading: true });
+  try {
+    const r = await api(`/tools/recompute_impact?limit=${limit}`, { method: 'POST' });
+    showToolsResult(`⟳ impact (limit=${limit})`, r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolRunPaper() {
+  showToolsResult('▶ paper engine', { loading: true });
+  try {
+    const r = await api('/tools/run_paper_engine', { method: 'POST' });
+    showToolsResult('▶ paper engine', r);
+    setTimeout(() => loadPaper(), 500);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolLoadHistory() {
+  const days = parseInt(document.getElementById('tool-history-days').value) || 2;
+  showToolsResult(`📥 load_history (days=${days})`, { loading: true });
+  try {
+    const r = await api(`/tools/load_history?days=${days}&interval=1`, { method: 'POST' });
+    showToolsResult(`📥 load_history (days=${days})`, r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolRefreshCalendar() {
+  showToolsResult('📅 refresh_calendar', { loading: true });
+  try {
+    const r = await api('/tools/refresh_calendar?day=today', { method: 'POST' });
+    showToolsResult('📅 refresh_calendar', r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolLoadCalendarWeek() {
+  const week = document.getElementById('tool-calendar-week').value;
+  showToolsResult(`📅 load_calendar_week (${week})`, { loading: true });
+  try {
+    const r = await api(`/tools/load_calendar_week?week=${week}`, { method: 'POST' });
+    showToolsResult(`📅 load_calendar_week (${week})`, r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolShowUpcoming() {
+  try {
+    const events = await api('/events/upcoming_high?days=7&limit=20');
+    const card = document.getElementById('tools-upcoming-card');
+    const tbody = document.getElementById('tools-upcoming-tbody');
+    if (events.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-slate-500">Немає high подій у наступні 7 днів</td></tr>';
+    } else {
+      tbody.innerHTML = events.map(e => `
+        <tr class="cursor-pointer" onclick="openEvent(${e.id})">
+          <td class="font-mono text-xs">${fmtBothFull(e.time_utc)}</td>
+          <td class="font-mono">${e.country}</td>
+          <td class="text-amber-400">${e.title}</td>
+          <td class="text-right font-mono text-xs">${e.forecast_value || '—'}</td>
+          <td class="text-right font-mono text-xs">${e.previous_value || '—'}</td>
+        </tr>
+      `).join('');
+    }
+    card.style.display = '';
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolDbStats() {
+  try {
+    const r = await api('/tools/db_stats');
+    showToolsResult('📊 db_stats', r);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolDbTables() {
+  const container = document.getElementById('db-tables-result');
+  container.innerHTML = '<span class="loading"></span>';
+  try {
+    const data = await api('/tools/db_tables');
+    let html = `<div class="text-xs text-slate-400 mb-2">
+      📁 ${data.db_path}<br>
+      Розмір: <b>${data.db_total_mb} МБ</b>
+    </div>`;
+    html += '<div class="table-wrap"><table class="text-xs"><thead><tr>';
+    html += '<th>Таблиця</th><th class="text-right">Рядків</th><th class="text-right">Розмір</th>';
+    html += '</tr></thead><tbody>';
+    for (const t of data.tables) {
+      html += `<tr>
+        <td class="font-mono">${t.table}</td>
+        <td class="text-right font-mono">${t.rows ?? '—'}</td>
+        <td class="text-right font-mono">${t.size_mb != null ? t.size_mb + ' МБ' : '—'}</td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+  } catch (e) { container.innerHTML = `<span class="text-red-400 text-xs">Помилка: ${e}</span>`; }
+}
+async function toolLogs() {
+  const lines = parseInt(document.getElementById('tool-logs-lines').value) || 100;
+  const grep = document.getElementById('tool-logs-grep').value.trim();
+  try {
+    const params = new URLSearchParams({ lines: lines });
+    if (grep) params.set('grep', grep);
+    const r = await api(`/tools/logs?${params.toString()}`);
+    if (r.error) { showToolsResult('📋 Логи (помилка)', r); }
+    else {
+      const card = document.getElementById('tools-result-card');
+      const pre = document.getElementById('tools-result');
+      card.style.display = '';
+      const timestamp = new Date().toLocaleString('uk-UA', { timeZone: LOCAL_TZ });
+      pre.textContent = `[${timestamp}] Логи (${r.count} рядків${grep ? `, grep="${grep}"` : ''})\n\n` + r.lines.join('\n');
+    }
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolDiagnostics() {
+  try {
+    const r = await api('/tools/diagnostics');
+    showToolsResult('🔍 diagnostics', r);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolPaperDiagnostics() {
+  try {
+    const r = await api('/tools/paper_diagnostics');
+    showToolsResult('💰 paper_diagnostics', r);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolClearImpact() {
+  if (!confirm('⚠️ Видалити всі записи з event_impact?')) return;
+  if (!confirm('Точно впевнений?')) return;
+  try {
+    const r = await api('/tools/clear_impact', { method: 'POST' });
+    showToolsResult('🗑 clear_impact', r);
+    setTimeout(() => loadDashboard(), 500);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
+}
+async function toolResetPaper() {
+  if (!confirm('⚠️ Скинути paper акаунт? Баланс повернеться до $100.')) return;
+  if (!confirm('Точно впевнений?')) return;
+  try {
+    const r = await api('/paper/reset', { method: 'POST' });
+    showToolsResult('↺ reset paper', r);
+    setTimeout(() => loadPaper(), 500);
+  } catch (e) { showToolsResult('❌', { error: String(e) }); }
 }
 
 // ==================== INIT ====================
@@ -1932,6 +2295,7 @@ setInterval(() => {
   if (active.dataset.tab === 'compare') loadCompare();
   if (active.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
   if (active.dataset.tab === 'naive') { loadNaiveTrades(); loadNaiveEquity(); }
+  if (active.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); }
 }, 30000);
 setInterval(() => {
   const active = document.querySelector('.tab.active');
