@@ -51,6 +51,10 @@ from app.live.executor import (
     update_live_size,
     clear_live,
 )
+from app.live.closer import (
+    process_live_closer,
+    get_live_equity_curve,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -101,7 +105,7 @@ def _iso_to_ms(iso_str: str | None) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Background jobs (ті самі + live_engine_job)
+# Background jobs
 # ---------------------------------------------------------------------------
 async def refresh_calendar(day: str = "today"):
     logger.info(f"Refreshing economic calendar (day={day})...")
@@ -146,10 +150,7 @@ async def refresh_calendar(day: str = "today"):
 
             await db.commit()
 
-        logger.info(
-            f"Calendar refreshed: fetched={len(events)}, "
-            f"inserted={inserted}, updated={updated}"
-        )
+        logger.info(f"Calendar refreshed: fetched={len(events)}, inserted={inserted}, updated={updated}")
         await manager.broadcast({
             "type": "calendar_refreshed",
             "fetched": len(events),
@@ -206,7 +207,6 @@ async def paper_engine_job():
 
 
 async def live_engine_job():
-    """LIVE engine — запускається кожну хвилину. У dry-run режимі тільки логує."""
     try:
         stats = await process_live_engine()
         if stats["opened"] or stats["errors"]:
@@ -214,6 +214,17 @@ async def live_engine_job():
         return stats
     except Exception as ex:
         logger.exception(f"LIVE engine failed: {ex}")
+        return {"error": str(ex)}
+
+
+async def live_closer_job():
+    try:
+        stats = await process_live_closer()
+        if stats["closed"] or stats["errors"]:
+            await manager.broadcast({"type": "live_closed", **stats})
+        return stats
+    except Exception as ex:
+        logger.exception(f"LIVE closer failed: {ex}")
         return {"error": str(ex)}
 
 
@@ -279,27 +290,16 @@ async def lifespan(app: FastAPI):
     except Exception as ex:
         logger.exception(f"Initial history load failed: {ex}")
 
-    scheduler.add_job(refresh_calendar, "interval",
-                      minutes=15, id="calendar_frequent",
-                      kwargs={"day": "today"})
-    scheduler.add_job(refresh_calendar, "interval",
-                      hours=settings.calendar_refresh_hours, id="calendar_interval",
-                      kwargs={"day": "today"})
-    scheduler.add_job(refresh_calendar, CronTrigger(hour=0, minute=1),
-                      id="calendar_daily", kwargs={"day": "today"})
-    scheduler.add_job(load_history_sync, "interval",
-                      hours=24, id="history_daily",
-                      kwargs={"days": 2, "interval": "1"})
-    scheduler.add_job(recompute_impact_job, "interval",
-                      minutes=30, id="impact_recompute_auto")
-    scheduler.add_job(paper_engine_job, "interval",
-                      minutes=1, id="paper_engine")
-    scheduler.add_job(live_engine_job, "interval",
-                      minutes=1, id="live_engine")
-    scheduler.add_job(check_upcoming_events, "interval",
-                      minutes=1, id="check_upcoming")
-    scheduler.add_job(weekly_report_job, CronTrigger(day_of_week="sun", hour=20, minute=0),
-                      id="weekly_report")
+    scheduler.add_job(refresh_calendar, "interval", minutes=15, id="calendar_frequent", kwargs={"day": "today"})
+    scheduler.add_job(refresh_calendar, "interval", hours=settings.calendar_refresh_hours, id="calendar_interval", kwargs={"day": "today"})
+    scheduler.add_job(refresh_calendar, CronTrigger(hour=0, minute=1), id="calendar_daily", kwargs={"day": "today"})
+    scheduler.add_job(load_history_sync, "interval", hours=24, id="history_daily", kwargs={"days": 2, "interval": "1"})
+    scheduler.add_job(recompute_impact_job, "interval", minutes=30, id="impact_recompute_auto")
+    scheduler.add_job(paper_engine_job, "interval", minutes=1, id="paper_engine")
+    scheduler.add_job(live_engine_job, "interval", minutes=1, id="live_engine")
+    scheduler.add_job(live_closer_job, "interval", minutes=1, id="live_closer")
+    scheduler.add_job(check_upcoming_events, "interval", minutes=1, id="check_upcoming")
+    scheduler.add_job(weekly_report_job, CronTrigger(day_of_week="sun", hour=20, minute=0), id="weekly_report")
     scheduler.start()
     logger.info(f"Scheduler started. Jobs: {[j.id for j in scheduler.get_jobs()]}")
 
@@ -396,12 +396,14 @@ async def tools_paper_diagnostics():
 # ============================================================================
 @app.get("/live/status")
 async def api_live_status():
-    """Поточний стан LIVE: увімкнено/вимкнено, розмір угоди, баланс Bybit."""
     bal = await get_bybit_balance()
     return {
         "live_enabled": settings.live_enabled,
         "trade_size_usd": settings.live_trade_size_usd,
         "max_pct_of_balance": settings.live_max_pct_of_balance,
+        "auto_close": settings.live_auto_close,
+        "exit_offset_min": settings.live_exit_offset_min,
+        "stop_loss_pct": settings.live_stop_loss_pct,
         "bybit": bal,
         "api_keys_configured": bool(settings.bybit_api_key and settings.bybit_api_secret),
         "testnet": settings.bybit_testnet,
@@ -432,14 +434,67 @@ async def api_live_clear():
 
 @app.post("/live/run")
 async def api_live_run():
-    """Ручний запуск LIVE engine (для тесту)."""
     stats = await process_live_engine()
     await manager.broadcast({"type": "live_updated", **stats})
     return stats
 
 
+@app.post("/live/close_all")
+async def api_live_close_all():
+    """Ручне закриття всіх FILLED позицій."""
+    stats = await process_live_closer(manual=True)
+    await manager.broadcast({"type": "live_closed", **stats})
+    return stats
+
+
+@app.get("/live/equity_curve")
+async def api_live_equity_curve():
+    return await get_live_equity_curve()
+
+
+@app.get("/live/summary")
+async def api_live_summary():
+    """Агрегована статистика LIVE: total P&L, win rate тощо."""
+    async with get_db() as db:
+        cur = await db.execute("""
+            SELECT
+                COUNT(*) AS n,
+                SUM(CASE WHEN status='CLOSED' AND pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN status='CLOSED' AND pnl <= 0 THEN 1 ELSE 0 END) AS losses,
+                SUM(CASE WHEN status='FILLED' THEN 1 ELSE 0 END) AS filled,
+                SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN status='DRY_RUN' THEN 1 ELSE 0 END) AS dry_run,
+                SUM(CASE WHEN status='REJECTED' THEN 1 ELSE 0 END) AS rejected,
+                SUM(CASE WHEN status='CLOSE_FAILED' THEN 1 ELSE 0 END) AS close_failed,
+                SUM(CASE WHEN status='CLOSED' THEN pnl ELSE 0 END) AS total_pnl
+            FROM live_trades
+        """)
+        s = await cur.fetchone()
+
+    n = s["n"] or 0
+    wins = s["wins"] or 0
+    losses = s["losses"] or 0
+    closed_n = wins + losses
+    win_rate = (wins / closed_n * 100) if closed_n > 0 else 0
+    total_pnl = s["total_pnl"] or 0
+
+    return {
+        "total": n,
+        "wins": wins,
+        "losses": losses,
+        "closed": closed_n,
+        "win_rate": round(win_rate, 1),
+        "total_pnl": round(total_pnl, 4),
+        "filled_open": s["filled"] or 0,
+        "pending": s["pending"] or 0,
+        "dry_run": s["dry_run"] or 0,
+        "rejected": s["rejected"] or 0,
+        "close_failed": s["close_failed"] or 0,
+    }
+
+
 # ============================================================================
-# API: Naive ("тупо тест")
+# API: Naive
 # ============================================================================
 @app.post("/naive/run")
 async def api_naive_run(
@@ -451,11 +506,8 @@ async def api_naive_run(
 ):
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     return await run_naive_test(
-        days=days,
-        symbols=syms,
-        size_usd=size_usd,
-        exit_offset_min=exit_offset_min,
-        reset=reset,
+        days=days, symbols=syms, size_usd=size_usd,
+        exit_offset_min=exit_offset_min, reset=reset,
     )
 
 
@@ -492,17 +544,15 @@ async def api_backtest_run(
 ):
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     return await run_backtest(
-        days=days,
-        reset=reset,
+        days=days, reset=reset,
         hit_rate_threshold=hit_rate_threshold,
-        min_move_pct=min_move_pct,
-        min_events=min_events,
-        symbols=syms,
-        spot_long_only=spot_long_only,
+        min_move_pct=min_move_pct, min_events=min_events,
+        symbols=syms, spot_long_only=spot_long_only,
         exit_offset_min=exit_offset_min,
         trade_size_usd=trade_size_usd,
         direction_filter=direction_filter,
     )
+
 
 @app.get("/backtest/trades")
 async def api_backtest_trades(limit: int = 500):
@@ -520,7 +570,7 @@ async def api_backtest_clear():
 
 
 # ============================================================================
-# API: stats / events / prices
+# API: stats / events / prices (без змін)
 # ============================================================================
 @app.get("/health")
 async def health():
@@ -532,13 +582,10 @@ async def api_stats():
     async with get_db() as db:
         cur = await db.execute("SELECT COUNT(*) AS n FROM events")
         events_count = (await cur.fetchone())["n"]
-
         cur = await db.execute("SELECT COUNT(*) AS n FROM prices")
         prices_count = (await cur.fetchone())["n"]
-
         cur = await db.execute("SELECT COUNT(*) AS n FROM event_impact")
         impact_count = (await cur.fetchone())["n"]
-
         cur = await db.execute(
             "SELECT MAX(ts) AS mx FROM prices WHERE symbol = ?",
             (settings.bybit_symbol,)
@@ -547,9 +594,7 @@ async def api_stats():
 
     last_ts_str = None
     if last_ts:
-        last_ts_str = datetime.fromtimestamp(
-            last_ts / 1000, tz=timezone.utc
-        ).strftime("%Y-%m-%d %H:%M UTC")
+        last_ts_str = datetime.fromtimestamp(last_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     return {
         "events_count": events_count,
@@ -569,27 +614,21 @@ async def api_events(
 ):
     where = ["1=1"]
     params: list = []
-
     if days_back is not None:
         from_iso = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
         where.append("e.time_utc >= ?")
         params.append(from_iso)
-
     if days_forward is not None:
         to_iso = (datetime.now(timezone.utc) + timedelta(days=days_forward)).isoformat()
         where.append("e.time_utc <= ?")
         params.append(to_iso)
-
     if search:
         where.append("LOWER(e.title) LIKE ?")
         params.append(f"%{search.lower()}%")
-
     if importance:
         where.append("e.importance = ?")
         params.append(importance)
-
     where_sql = " AND ".join(where)
-
     async with get_db() as db:
         cur = await db.execute(f"""
             SELECT e.id, e.title, e.country, e.importance, e.time_utc,
@@ -610,7 +649,6 @@ async def api_events(
 async def api_events_calendar(days: int = 7):
     from_iso = datetime.now(timezone.utc).isoformat()
     to_iso = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT id, title, country, importance, time_utc,
@@ -627,7 +665,6 @@ async def api_events_calendar(days: int = 7):
 async def api_events_upcoming_high(days: int = 7, limit: int = 20):
     from_iso = datetime.now(timezone.utc).isoformat()
     to_iso = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT id, title, country, importance, time_utc,
@@ -645,7 +682,6 @@ async def api_events_upcoming_high(days: int = 7, limit: int = 20):
 @app.get("/events/next_high")
 async def api_events_next_high():
     now = datetime.now(timezone.utc)
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT id, title, country, importance, time_utc, forecast_value
@@ -656,30 +692,23 @@ async def api_events_next_high():
             LIMIT 1
         """, (now.isoformat(),))
         row = await cur.fetchone()
-
     if not row:
         return {"next_high": None}
-
     target = datetime.fromisoformat(row["time_utc"].replace("Z", "+00:00"))
     delta = target - now
     total_seconds = int(delta.total_seconds())
-    days = total_seconds // 86400
-    hours = (total_seconds % 86400) // 3600
-    minutes = (total_seconds % 3600) // 60
-
     return {
         "next_high": dict(row),
         "seconds_until": total_seconds,
-        "days": days,
-        "hours": hours,
-        "minutes": minutes,
+        "days": total_seconds // 86400,
+        "hours": (total_seconds % 86400) // 3600,
+        "minutes": (total_seconds % 3600) // 60,
     }
 
 
 @app.get("/events/compare")
 async def api_events_compare(days_back: int = 30, limit: int = 100):
     from_iso = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT
@@ -702,7 +731,6 @@ async def api_events_compare(days_back: int = 30, limit: int = 100):
             LIMIT ?
         """, (from_iso, limit))
         rows = await cur.fetchall()
-
     return [dict(r) for r in rows]
 
 
@@ -730,7 +758,6 @@ async def api_prices_range(hours: int = 24, symbol: str | None = None):
     sym = symbol or settings.bybit_symbol
     now_ms = int(_time.time() * 1000)
     from_ms = now_ms - hours * 60 * 60 * 1000
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT ts, open, high, low, close, volume
@@ -739,11 +766,7 @@ async def api_prices_range(hours: int = 24, symbol: str | None = None):
             ORDER BY ts ASC
         """, (sym, from_ms))
         candles = [dict(r) for r in await cur.fetchall()]
-
-        from_iso = datetime.fromtimestamp(
-            from_ms / 1000, tz=timezone.utc
-        ).isoformat()
-
+        from_iso = datetime.fromtimestamp(from_ms / 1000, tz=timezone.utc).isoformat()
         cur = await db.execute("""
             SELECT e.id, e.title, e.country, e.importance, e.time_utc,
                    ei.hit, ei.ret_15m, ei.dir_15m, ei.expected_dir
@@ -753,12 +776,11 @@ async def api_prices_range(hours: int = 24, symbol: str | None = None):
             ORDER BY e.time_utc ASC
         """, (from_iso,))
         events = [dict(r) for r in await cur.fetchall()]
-
     return {"symbol": sym, "hours": hours, "candles": candles, "events": events}
 
 
 # ============================================================================
-# API: CSV export (без змін, окрім доданого live)
+# API: CSV export (без змін)
 # ============================================================================
 @app.get("/events/export.csv")
 async def api_events_export_csv(
@@ -768,7 +790,6 @@ async def api_events_export_csv(
 ):
     where = ["1=1"]
     params: list = []
-
     if days_back is not None:
         from_iso = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
         where.append("e.time_utc >= ?")
@@ -779,7 +800,6 @@ async def api_events_export_csv(
     if search:
         where.append("LOWER(e.title) LIKE ?")
         params.append(f"%{search.lower()}%")
-
     where_sql = " AND ".join(where)
 
     async with get_db() as db:
@@ -810,7 +830,6 @@ async def api_events_export_csv(
     ])
     for r in rows:
         writer.writerow([r[k] for k in r.keys()])
-
     buf.seek(0)
     filename = f"events_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.csv"
     return StreamingResponse(
@@ -837,7 +856,6 @@ async def api_paper_trades_export_csv():
             ORDER BY pt.id DESC
         """)
         rows = await cur.fetchall()
-
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
@@ -850,7 +868,6 @@ async def api_paper_trades_export_csv():
     ])
     for r in rows:
         writer.writerow([r[k] for k in r.keys()])
-
     buf.seek(0)
     filename = f"paper_trades_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.csv"
     return StreamingResponse(
@@ -861,7 +878,7 @@ async def api_paper_trades_export_csv():
 
 
 # ============================================================================
-# API: impact
+# API: impact (без змін)
 # ============================================================================
 @app.post("/impact/recompute")
 async def api_impact_recompute(limit: int = 500):
@@ -869,9 +886,7 @@ async def api_impact_recompute(limit: int = 500):
 
 
 @app.get("/impact/stats")
-async def api_impact_stats(symbol: str | None = None,
-                            importance: str | None = None,
-                            min_events: int = 1):
+async def api_impact_stats(symbol: str | None = None, importance: str | None = None, min_events: int = 1):
     return await get_stats(symbol=symbol, importance=importance, min_events=min_events)
 
 
@@ -904,10 +919,8 @@ async def api_impact_cross_asset(event_id: int):
 async def _build_live_current() -> dict:
     now_ms = int(_time.time() * 1000)
     window_ms = 2 * 60 * 1000
-
     lo_iso = datetime.fromtimestamp((now_ms - window_ms) / 1000, tz=timezone.utc).isoformat()
     hi_iso = datetime.fromtimestamp((now_ms + window_ms) / 1000, tz=timezone.utc).isoformat()
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT id, title, country, importance, time_utc,
@@ -918,7 +931,6 @@ async def _build_live_current() -> dict:
             ORDER BY time_utc ASC
         """, (lo_iso, hi_iso))
         events = [dict(r) for r in await cur.fetchall()]
-
         result = []
         for ev in events:
             ev_ts = _iso_to_ms(ev["time_utc"])
@@ -935,7 +947,6 @@ async def _build_live_current() -> dict:
                 """, (sym, baseline_ts - 60_000, baseline_ts + 60_000, baseline_ts))
                 row = await cur.fetchone()
                 baseline = float(row["close"]) if row else None
-
                 cur = await db.execute("""
                     SELECT ts, close FROM prices
                     WHERE symbol = ? AND interval = '1'
@@ -946,14 +957,11 @@ async def _build_live_current() -> dict:
                     current = float(row["close"])
                     ret_pct = (current - baseline) / baseline * 100.0
                     symbols_data[sym] = {
-                        "baseline": baseline,
-                        "current": current,
-                        "current_ts": row["ts"],
-                        "ret_pct": ret_pct,
+                        "baseline": baseline, "current": current,
+                        "current_ts": row["ts"], "ret_pct": ret_pct,
                     }
                 else:
                     symbols_data[sym] = None
-
             result.append({
                 "event": ev,
                 "seconds_since": max(0, int((now_ms - ev_ts) / 1000)),
@@ -985,7 +993,6 @@ async def api_paper_trades(limit: int = 100, status: str | None = None):
 async def api_paper_trades_range(hours: int = 24):
     now_ms = int(_time.time() * 1000)
     from_ms = now_ms - hours * 60 * 60 * 1000
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT
@@ -1059,7 +1066,6 @@ async def tools_load_calendar_week(week: str = "this"):
     weeks = [week]
     if week != "this":
         weeks.append("this")
-
     for w in weeks:
         try:
             events = fetch_events(week=w)
@@ -1085,7 +1091,6 @@ async def tools_load_calendar_week(week: str = "this"):
             await db.commit()
         per_week[w] = {"fetched": len(events), "inserted": inserted}
         total_inserted += inserted
-
     return {"per_week": per_week, "total_inserted": total_inserted}
 
 
@@ -1104,51 +1109,27 @@ async def tools_clear_impact():
 async def tools_db_stats():
     async with get_db() as db:
         stats = {}
-
         cur = await db.execute("SELECT COUNT(*) AS n FROM events")
         stats["events_total"] = (await cur.fetchone())["n"]
-
-        cur = await db.execute("""
-            SELECT importance, COUNT(*) AS n FROM events GROUP BY importance
-        """)
+        cur = await db.execute("SELECT importance, COUNT(*) AS n FROM events GROUP BY importance")
         stats["events_by_importance"] = {r["importance"]: r["n"] for r in await cur.fetchall()}
-
-        cur = await db.execute("""
-            SELECT symbol, COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx
-            FROM prices GROUP BY symbol
-        """)
+        cur = await db.execute("SELECT symbol, COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM prices GROUP BY symbol")
         stats["prices"] = []
         for r in await cur.fetchall():
             stats["prices"].append({
-                "symbol": r["symbol"],
-                "count": r["n"],
-                "min_ts": r["mn"],
-                "max_ts": r["mx"],
+                "symbol": r["symbol"], "count": r["n"],
+                "min_ts": r["mn"], "max_ts": r["mx"],
             })
-
-        cur = await db.execute("""
-            SELECT hit, COUNT(*) AS n FROM event_impact GROUP BY hit
-        """)
+        cur = await db.execute("SELECT hit, COUNT(*) AS n FROM event_impact GROUP BY hit")
         stats["impact_by_hit"] = {r["hit"]: r["n"] for r in await cur.fetchall()}
-
-        cur = await db.execute("""
-            SELECT symbol, COUNT(*) AS n FROM event_impact GROUP BY symbol
-        """)
+        cur = await db.execute("SELECT symbol, COUNT(*) AS n FROM event_impact GROUP BY symbol")
         stats["impact_by_symbol"] = {r["symbol"]: r["n"] for r in await cur.fetchall()}
-
-        cur = await db.execute("""
-            SELECT status, COUNT(*) AS n FROM paper_trades GROUP BY status
-        """)
+        cur = await db.execute("SELECT status, COUNT(*) AS n FROM paper_trades GROUP BY status")
         stats["paper_trades"] = {r["status"]: r["n"] for r in await cur.fetchall()}
-
         cur = await db.execute("SELECT balance, initial_balance FROM paper_account WHERE id=1")
         acc = await cur.fetchone()
         if acc:
-            stats["paper_account"] = {
-                "balance": acc["balance"],
-                "initial": acc["initial_balance"],
-            }
-
+            stats["paper_account"] = {"balance": acc["balance"], "initial": acc["initial_balance"]}
     return stats
 
 
@@ -1156,7 +1137,6 @@ async def tools_db_stats():
 async def tools_db_tables():
     import os
     from app.config import settings as _settings
-
     async with get_db() as db:
         cur = await db.execute("""
             SELECT name FROM sqlite_master
@@ -1164,37 +1144,28 @@ async def tools_db_tables():
             ORDER BY name
         """)
         tables = [r["name"] for r in await cur.fetchall()]
-
         result = []
         for table in tables:
             try:
                 cur = await db.execute(f"SELECT COUNT(*) AS n FROM {table}")
                 n = (await cur.fetchone())["n"]
-
                 size_bytes = None
                 try:
-                    cur = await db.execute(
-                        "SELECT SUM(pgsize) AS sz FROM dbstat WHERE name = ?",
-                        (table,)
-                    )
+                    cur = await db.execute("SELECT SUM(pgsize) AS sz FROM dbstat WHERE name = ?", (table,))
                     row = await cur.fetchone()
                     if row and row["sz"] is not None:
                         size_bytes = row["sz"]
                 except Exception:
                     pass
-
                 result.append({
-                    "table": table,
-                    "rows": n,
+                    "table": table, "rows": n,
                     "size_bytes": size_bytes,
                     "size_mb": round(size_bytes / 1024 / 1024, 3) if size_bytes else None,
                 })
             except Exception as ex:
                 result.append({"table": table, "error": str(ex)})
-
     db_path = _settings.db_path_abs
     total_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
-
     return {
         "db_path": db_path,
         "db_total_bytes": total_size,
@@ -1206,14 +1177,11 @@ async def tools_db_tables():
 @app.get("/tools/logs")
 async def tools_logs(lines: int = 100, grep: str | None = None):
     try:
-        cmd = ["journalctl", "-u", "newsbot.service", "-n", str(lines),
-               "--no-pager", "-o", "cat"]
+        cmd = ["journalctl", "-u", "newsbot.service", "-n", str(lines), "--no-pager", "-o", "cat"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         output = result.stdout.split("\n")
-
         if grep:
             output = [l for l in output if grep.lower() in l.lower()]
-
         return {"lines": output, "count": len(output), "grep": grep}
     except FileNotFoundError:
         return {"error": "journalctl недоступний (не systemd?)"}
@@ -1236,10 +1204,8 @@ async def tools_diagnostics():
             WHERE symbol = 'SOLUSDT'
         """)
         overall = dict(await cur.fetchone())
-
         cur = await db.execute("""
-            SELECT
-                importance,
+            SELECT importance,
                 COUNT(*) AS n,
                 SUM(CASE WHEN hit='HIT' THEN 1 ELSE 0 END) AS hits,
                 SUM(CASE WHEN hit='MISS' THEN 1 ELSE 0 END) AS misses,
@@ -1250,13 +1216,9 @@ async def tools_diagnostics():
             GROUP BY importance
         """)
         by_importance = [dict(r) for r in await cur.fetchall()]
-
     return {"overall": overall, "by_importance": by_importance}
 
 
-# ============================================================================
-# API: history loading (legacy)
-# ============================================================================
 @app.post("/events/load_history")
 async def api_events_load_history(week: str = "last", include_this_week: bool = True):
     total_inserted = 0

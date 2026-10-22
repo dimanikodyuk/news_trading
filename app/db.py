@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS event_impact (
     importance TEXT,
     price_baseline REAL,
     price_t1 REAL, price_t5 REAL, price_t15 REAL, price_t30 REAL, price_t60 REAL,
-    ret_1m REAL, ret_5m REAL, ret_15m, ret_30m, ret_60m,
+    ret_1m REAL, ret_5m REAL, ret_15m REAL, ret_30m REAL, ret_60m REAL,
     dir_1m TEXT, dir_5m TEXT, dir_15m TEXT, dir_30m TEXT, dir_60m TEXT,
     expected_dir TEXT,
     hit TEXT,
@@ -116,7 +116,6 @@ CREATE TABLE IF NOT EXISTS event_reminders (
     UNIQUE(event_id)
 );
 
--- NAIVE: "тупо тест" — угода на КОЖНУ high-подію (без фільтрів paper)
 CREATE TABLE IF NOT EXISTS naive_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_group_key TEXT NOT NULL,
@@ -142,7 +141,6 @@ CREATE TABLE IF NOT EXISTS naive_trades (
     UNIQUE(event_group_key, symbol)
 );
 
--- LIVE: реальні угоди на Bybit (записуються ТІЛЬКИ якщо live_enabled=True)
 CREATE TABLE IF NOT EXISTS live_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_group_key TEXT NOT NULL,
@@ -157,8 +155,14 @@ CREATE TABLE IF NOT EXISTS live_trades (
     bybit_order_id TEXT,
     entry_price REAL,
     entry_ts INTEGER,
+    exit_price REAL,
+    exit_ts INTEGER,
+    pnl REAL,
+    pnl_pct REAL,
+    close_attempts INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'PENDING',
     error_message TEXT,
+    closed_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(event_group_key, symbol)
 );
@@ -216,9 +220,7 @@ async def _migrate_backtest_trades(db: aiosqlite.Connection):
     sql = await _table_sql(db, "backtest_trades")
     if sql is None:
         return
-    needs_recreate = (
-        "UNIQUE(event_time_utc, symbol, direction)" not in sql
-    )
+    needs_recreate = ("UNIQUE(event_time_utc, symbol, direction)" not in sql)
     if not needs_recreate:
         return
     logger.warning("backtest_trades має стару схему — пересоздаю")
@@ -248,20 +250,43 @@ async def _migrate_backtest_trades(db: aiosqlite.Connection):
         )
     """)
     await db.commit()
-    logger.info("backtest_trades пересоздано")
 
 
 async def _migrate_naive_trades(db: aiosqlite.Connection):
     sql = await _table_sql(db, "naive_trades")
     if sql is None:
         return
-    needs_recreate = (
-        "UNIQUE(event_group_key, symbol)" not in sql
-    )
+    needs_recreate = ("UNIQUE(event_group_key, symbol)" not in sql)
     if not needs_recreate:
         return
     logger.warning("naive_trades має стару схему — пересоздаю")
     await db.execute("DROP TABLE IF EXISTS naive_trades")
+    await db.commit()
+
+
+async def _migrate_live_trades(db: aiosqlite.Connection):
+    """FIX: додаємо нові колонки в live_trades, якщо їх немає."""
+    sql = await _table_sql(db, "live_trades")
+    if sql is None:
+        return
+    # Перевіряємо, чи є колонка exit_price
+    cur = await db.execute("PRAGMA table_info(live_trades)")
+    cols = {r["name"] for r in await cur.fetchall()}
+    new_cols = [
+        ("exit_price", "REAL"),
+        ("exit_ts", "INTEGER"),
+        ("pnl", "REAL"),
+        ("pnl_pct", "REAL"),
+        ("close_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("closed_at", "TEXT"),
+    ]
+    for col, coltype in new_cols:
+        if col not in cols:
+            try:
+                await db.execute(f"ALTER TABLE live_trades ADD COLUMN {col} {coltype}")
+                logger.info(f"Міграція live_trades: додано {col}")
+            except Exception as ex:
+                logger.warning(f"Не вдалось додати live_trades.{col}: {ex}")
     await db.commit()
 
 
@@ -276,6 +301,7 @@ async def init_db():
 
         await _migrate_backtest_trades(db)
         await _migrate_naive_trades(db)
+        await _migrate_live_trades(db)
 
         await db.executescript(INDEXES_SQL)
         await db.commit()

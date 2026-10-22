@@ -143,18 +143,13 @@
     .zoom-btn { width: 32px; height: 32px; font-size: 0.9rem; }
     .symbol-tab { padding: 0.35rem 0.7rem; font-size: 0.75rem; }
     .chart-container .zoom-controls { top: 4px; right: 4px; }
-    /* Кнопки для тапу — мінімум 40px */
     button { min-height: 36px; }
-    /* Інпути — не занадто вузькі */
     input[type="number"], input[type="text"], select { min-height: 36px; }
-    /* Nav — компактніший */
     nav { padding: 0.5rem 0.75rem !important; }
     nav .text-xl { font-size: 1rem !important; }
     nav .equity-badge { display: none; }
-    /* Modal — на всю ширину */
     #modal .card { max-height: 95vh; padding: 1rem !important; }
     #modal-title { font-size: 1.1rem; }
-    /* Grid картки в 2 колонки на мобільному */
     .grid.md\:grid-cols-4, .grid.md\:grid-cols-5, .grid.md\:grid-cols-7 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
     .grid.grid-cols-2.md\:grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
     .grid.grid-cols-2.md\:grid-cols-7 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
@@ -166,7 +161,6 @@
     .grid.grid-cols-2.md\:grid-cols-4 { grid-template-columns: 1fr 1fr !important; }
   }
 
-  /* Забороняємо zoom на iOS при подвійному тапі (щоб не ламало chart) */
   .chart-container canvas { touch-action: pan-y; }
 </style>
 </head>
@@ -740,6 +734,7 @@
       </div>
     </div>
 
+    <!-- Статус + баланс -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
       <div class="card p-4">
         <div class="text-sm text-slate-400">LIVE статус</div>
@@ -763,6 +758,34 @@
       </div>
     </div>
 
+    <!-- LIVE summary -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Відкрито (FILLED)</div>
+        <div class="text-2xl font-bold font-mono text-cyan-400" id="live-filled-open">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Win Rate</div>
+        <div class="text-2xl font-bold font-mono" id="live-winrate">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Total P&L</div>
+        <div class="text-2xl font-bold font-mono" id="live-total-pnl">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Rejected / Failed</div>
+        <div class="text-2xl font-bold font-mono" id="live-failed">—</div>
+      </div>
+    </div>
+
+    <!-- Equity curve -->
+    <div class="card p-4 mb-4">
+      <h2 class="section-title">📈 Equity curve (LIVE)</h2>
+      <canvas id="live-equity-chart" height="80"></canvas>
+      <div class="hint mt-2" id="live-equity-hint">Очікування першої закритої угоди…</div>
+    </div>
+
+    <!-- Управління -->
     <div class="card p-4 mb-4">
       <h2 class="section-title">⚙ Управління</h2>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -789,11 +812,17 @@
         <div>
           <label class="text-xs text-slate-400 block mb-1">Дії</label>
           <button onclick="runLiveEngine()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm w-full mb-1">▶ Запустити вручну</button>
-          <button onclick="clearLive()" class="px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm w-full">🗑 Очистити live_trades</button>
+          <button onclick="clearLive()" class="px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm w-full mb-1">🗑 Очистити live_trades</button>
+          <button onclick="closeAllLive()" id="live-close-all-btn"
+                  class="px-3 py-2 bg-amber-700 hover:bg-amber-600 rounded text-sm w-full font-semibold">
+            🔒 ЗАКРИТИ ВСІ FILLED
+          </button>
+          <div class="hint" id="live-close-all-hint">Ручне закриття всіх відкритих позицій</div>
         </div>
       </div>
     </div>
 
+    <!-- Угоди -->
     <div class="card p-4" id="live-trades-card" style="display:none">
       <h2 class="section-title">📋 Live угоди</h2>
       <div class="table-wrap">
@@ -806,6 +835,9 @@
             <th class="text-center">Голоси</th>
             <th class="text-right">Розмір</th>
             <th class="text-right">Entry</th>
+            <th class="text-right">Exit</th>
+            <th class="text-right">P&L</th>
+            <th class="text-right">P&L %</th>
             <th class="text-center">Статус</th>
             <th class="text-right">Order ID</th>
           </tr></thead>
@@ -823,7 +855,6 @@
   <div id="tab-tools" style="display:none">
     <h1 class="text-2xl font-bold mb-4">🔧 Інструменти</h1>
 
-    <!-- Управління -->
     <div class="card p-4 mb-4">
       <h2 class="section-title">⚙ Управління</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -883,7 +914,6 @@
       </div>
     </div>
 
-    <!-- Результат останньої дії -->
     <div class="card p-4 mb-4" id="tools-result-card" style="display:none">
       <h2 class="section-title">
         📋 Результат останньої дії
@@ -892,7 +922,6 @@
       <pre id="tools-result" class="text-xs font-mono text-slate-300 bg-slate-900 p-3 rounded overflow-auto max-h-96"></pre>
     </div>
 
-    <!-- Найближчі high події -->
     <div class="card p-4 mb-4" id="tools-upcoming-card" style="display:none">
       <h2 class="section-title">🔥 Найближчі high події</h2>
       <div class="table-wrap">
@@ -909,7 +938,6 @@
       </div>
     </div>
 
-    <!-- Діагностика -->
     <div class="card p-4 mb-4">
       <h2 class="section-title">🩺 Діагностика</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -958,7 +986,6 @@
       </div>
     </div>
 
-    <!-- Небезпечні дії -->
     <div class="card p-4 mb-4 border-red-900">
       <h2 class="section-title text-red-400">⚠ Небезпечні дії</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -985,7 +1012,7 @@
       <p class="text-slate-300 text-sm leading-relaxed">
         Симуляція "що було б, якби я торгував на КОЖНУ high-подію".<br>
         <b>Логіка:</b> події в межах ±60 сек групуються як одна. Голосування по expected_dir:
-        up > down → LONG, down > up → SHORT, рівність → пропуск.<br>
+        score = up - down. score > 0 → LONG, score < 0 → SHORT, score = 0 → пропуск.<br>
         <b>Вхід:</b> close на T+1. <b>Вихід:</b> close на T+60 (налаштовується).<br>
         <b>Розмір:</b> фіксований $10 / угоду (налаштовується).<br>
         <b>Символи:</b> SOL/BTC/ETH — на кожен окрема угода.<br>
@@ -1000,6 +1027,18 @@
         SPOT + LONG-only. Фільтри: importance=high, hit=HIT/MISS, hit_rate≥60%, |ret_15m|≥0.3%.<br>
         Вхід: close T+1 (вікно T+1..T+30). Вихід: close T+60. Розмір: $10 за угоду.<br>
         Символи: SOLUSDT + BTCUSDT.
+      </p>
+    </div>
+
+    <div class="card p-4 mb-4">
+      <h2 class="text-lg font-semibold text-cyan-400 mb-3">🔴 LIVE TRADING</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Реальні Market ордери на Bybit Spot (SOLUSDT, BTCUSDT).<br>
+        <b>Розмір:</b> налаштовується онлайн (за замовчуванням $5, максимум 10% від балансу).<br>
+        <b>Auto-close:</b> T+60 хв після події (налаштовується через LIVE_EXIT_OFFSET_MIN).<br>
+        <b>Stop-loss:</b> -5% від entry (налаштовується через LIVE_STOP_LOSS_PCT).<br>
+        <b>Manual close:</b> кнопка "ЗАКРИТИ ВСІ FILLED" — закриває всі відкриті позиції.<br>
+        <b>Безпека:</b> LIVE_ENABLED=False за замовчуванням. Увімкнення — тільки вручну з подвійним підтвердженням.
       </p>
     </div>
 
@@ -1082,7 +1121,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
     if (t.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
     if (t.dataset.tab === 'naive') { loadNaiveTrades(); loadNaiveEquity(); }
-    if (t.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); }
+    if (t.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); loadLiveSummary(); loadLiveEquity(); }
   };
 });
 
@@ -1123,6 +1162,7 @@ function metric(label, value, cls, tip) {
 }
 
 let priceChart = null, hitChart = null, equityChart = null;
+let liveEquityChart = null;
 let currentChartHours = 6;
 let currentPrices = {};
 let impactSymbol = 'SOLUSDT';
@@ -1805,6 +1845,10 @@ document.addEventListener('DOMContentLoaded', () => {
           if (tab && tab.dataset.tab === 'paper') loadPaper();
           if (tab && tab.dataset.tab === 'dashboard') loadPriceChart();
         }
+        if (msg.type === 'live_updated' || msg.type === 'live_closed') {
+          const tab = document.querySelector('.tab.active');
+          if (tab && tab.dataset.tab === 'live-trading') { loadLiveTrades(); loadLiveSummary(); loadLiveEquity(); }
+        }
         if (msg.type === 'live_update') {
           const liveTab = document.getElementById('tab-live');
           if (liveTab && liveTab.style.display !== 'none') renderLiveList(msg.data);
@@ -1968,6 +2012,8 @@ async function loadLiveStatus() {
     document.getElementById('live-keys').className = 'text-2xl font-bold ' + (s.api_keys_configured ? 'up' : 'down');
     document.getElementById('live-keys-hint').textContent = s.testnet ? 'Testnet' : 'Mainnet';
     document.getElementById('live-size-input').value = s.trade_size_usd;
+    const auto = s.auto_close ? `Auto-close: T+${s.exit_offset_min}хв, stop-loss ${s.stop_loss_pct}%` : 'Auto-close: вимкнено';
+    document.getElementById('live-close-all-hint').textContent = auto;
   } catch (e) { console.error('loadLiveStatus failed', e); }
 }
 async function toggleLive(enabled) {
@@ -1993,6 +2039,17 @@ async function clearLive() {
   if (!confirm('Видалити всі live_trades?')) return;
   await api('/live/clear', { method: 'POST' });
   loadLiveTrades();
+  loadLiveSummary();
+  loadLiveEquity();
+}
+async function closeAllLive() {
+  if (!confirm('⚠️ Закрити ВСІ відкриті LIVE-позиції за Market? Це відправить реальні ордери.')) return;
+  if (!confirm('Точно впевнений? Друге підтвердження.')) return;
+  const r = await api('/live/close_all', { method: 'POST' });
+  alert('Готово: ' + JSON.stringify(r));
+  loadLiveTrades();
+  loadLiveSummary();
+  loadLiveEquity();
 }
 async function loadLiveTrades() {
   try {
@@ -2003,7 +2060,14 @@ async function loadLiveTrades() {
     if (trades.length === 0) { card.style.display = 'none'; empty.style.display = ''; return; }
     card.style.display = ''; empty.style.display = 'none';
     tbody.innerHTML = trades.map(t => {
-      const statusCls = t.status === 'FILLED' ? 'badge-hit' : t.status === 'REJECTED' ? 'badge-miss' : t.status === 'DRY_RUN' ? 'badge-na' : 'badge-open';
+      const statusCls = t.status === 'FILLED' ? 'badge-hit' :
+                        t.status === 'CLOSED' ? 'badge-closed' :
+                        t.status === 'REJECTED' ? 'badge-miss' :
+                        t.status === 'CLOSE_FAILED' ? 'badge-miss' :
+                        t.status === 'DRY_RUN' ? 'badge-na' : 'badge-open';
+      const pnl = t.pnl;
+      const pnlSign = pnl != null ? (pnl >= 0 ? '+' : '') : '';
+      const pnlCls = pnl != null ? (pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat') : 'flat';
       return `<tr>
         <td class="font-mono text-xs">${fmtBothFull(t.event_time_utc)}</td>
         <td class="text-cyan-400">${t.event_title}</td>
@@ -2012,11 +2076,48 @@ async function loadLiveTrades() {
         <td class="text-center font-mono text-xs"><span class="up">${t.votes_up}</span>/<span class="down">${t.votes_down}</span></td>
         <td class="text-right font-mono">$${t.size_usd.toFixed(2)}</td>
         <td class="text-right font-mono">${t.entry_price ? fmtUsd4(t.entry_price) : '—'}</td>
+        <td class="text-right font-mono">${t.exit_price ? fmtUsd4(t.exit_price) : '—'}</td>
+        <td class="text-right font-mono ${pnlCls}">${pnl != null ? pnlSign + fmtUsd(pnl) : '—'}</td>
+        <td class="text-right font-mono ${pnlCls}">${pnl != null ? pnlSign + (t.pnl_pct || 0).toFixed(3) + '%' : '—'}</td>
         <td class="text-center"><span class="${statusCls} px-2 py-0.5 rounded text-xs">${t.status}</span></td>
         <td class="text-right font-mono text-xs">${t.bybit_order_id || '—'}</td>
       </tr>`;
     }).join('');
   } catch (e) { console.error('loadLiveTrades failed', e); }
+}
+async function loadLiveSummary() {
+  try {
+    const s = await api('/live/summary');
+    document.getElementById('live-filled-open').textContent = s.filled_open;
+    document.getElementById('live-winrate').textContent = s.win_rate != null ? s.win_rate.toFixed(1) + '%' : '—';
+    document.getElementById('live-winrate').className = 'text-2xl font-bold font-mono ' + (s.win_rate >= 50 ? 'up' : s.win_rate > 0 ? 'down' : 'flat');
+    document.getElementById('live-total-pnl').textContent = (s.total_pnl >= 0 ? '+' : '') + fmtUsd(s.total_pnl);
+    document.getElementById('live-total-pnl').className = 'text-2xl font-bold font-mono ' + clsFor(s.total_pnl);
+    document.getElementById('live-failed').textContent = `${s.rejected} / ${s.close_failed}`;
+    document.getElementById('live-failed').className = 'text-2xl font-bold font-mono ' + (s.rejected + s.close_failed > 0 ? 'down' : 'flat');
+  } catch (e) { console.error('loadLiveSummary failed', e); }
+}
+async function loadLiveEquity() {
+  try {
+    const curve = await api('/live/equity_curve');
+    if (!curve || curve.length === 0) {
+      document.getElementById('live-equity-hint').textContent = 'Очікування першої закритої угоди…';
+      if (liveEquityChart) { liveEquityChart.destroy(); liveEquityChart = null; }
+      return;
+    }
+    document.getElementById('live-equity-hint').textContent = `${curve.length} угод, фінал: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
+    const labels = curve.map(p => {
+      const d = new Date(p.ts.replace(' ', 'T') + 'Z');
+      return d.toLocaleString('uk-UA', { timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '');
+    });
+    const data = curve.map(p => p.cum_pnl);
+    if (liveEquityChart) liveEquityChart.destroy();
+    liveEquityChart = new Chart(document.getElementById('live-equity-chart'), {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'LIVE Cumulative P&L, $', data, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, tension: 0.2, pointRadius: 3, fill: true }] },
+      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 8 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
+    });
+  } catch (e) { console.error('loadLiveEquity failed', e); }
 }
 
 // ==================== NAIVE ====================
@@ -2295,7 +2396,7 @@ setInterval(() => {
   if (active.dataset.tab === 'compare') loadCompare();
   if (active.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
   if (active.dataset.tab === 'naive') { loadNaiveTrades(); loadNaiveEquity(); }
-  if (active.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); }
+  if (active.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); loadLiveSummary(); loadLiveEquity(); }
 }, 30000);
 setInterval(() => {
   const active = document.querySelector('.tab.active');

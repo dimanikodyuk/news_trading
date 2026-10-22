@@ -20,9 +20,12 @@ class Settings(BaseSettings):
     bybit_testnet: bool = False
 
     # LIVE trading
-    live_enabled: bool = False          # майстер-вимикач (за замовчуванням ВИМКНЕНО)
-    live_trade_size_usd: float = 5.0    # розмір угоди за замовчуванням
-    live_max_pct_of_balance: float = 10.0  # максимум % від балансу на одну угоду
+    live_enabled: bool = False
+    live_trade_size_usd: float = 5.0
+    live_max_pct_of_balance: float = 10.0
+    live_auto_close: bool = True
+    live_exit_offset_min: int = 60
+    live_stop_loss_pct: float = 5.0
 
     # Telegram
     tg_bot_token: str = ""
