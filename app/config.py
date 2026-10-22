@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     bybit_symbol: str = "SOLUSDT"
     bybit_kline_interval: int = 1
 
+    # Bybit API (для LIVE)
+    bybit_api_key: str = ""
+    bybit_api_secret: str = ""
+    bybit_testnet: bool = False
+
+    # LIVE trading
+    live_enabled: bool = False          # майстер-вимикач (за замовчуванням ВИМКНЕНО)
+    live_trade_size_usd: float = 5.0    # розмір угоди за замовчуванням
+    live_max_pct_of_balance: float = 10.0  # максимум % від балансу на одну угоду
+
     # Telegram
     tg_bot_token: str = ""
     tg_chat_id: int = 0

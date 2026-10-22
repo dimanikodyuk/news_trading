@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS event_impact (
     importance TEXT,
     price_baseline REAL,
     price_t1 REAL, price_t5 REAL, price_t15 REAL, price_t30 REAL, price_t60 REAL,
-    ret_1m REAL, ret_5m REAL, ret_15m REAL, ret_30m REAL, ret_60m REAL,
+    ret_1m REAL, ret_5m REAL, ret_15m, ret_30m, ret_60m,
     dir_1m TEXT, dir_5m TEXT, dir_15m TEXT, dir_30m TEXT, dir_60m TEXT,
     expected_dir TEXT,
     hit TEXT,
@@ -119,9 +119,9 @@ CREATE TABLE IF NOT EXISTS event_reminders (
 -- NAIVE: "тупо тест" — угода на КОЖНУ high-подію (без фільтрів paper)
 CREATE TABLE IF NOT EXISTS naive_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_group_key TEXT NOT NULL,      -- напр. "2026-10-15T14:30" (хвилина групи)
-    event_ids TEXT,                     -- "12,13" — id подій у групі
-    event_title TEXT,                   -- склеєні назви
+    event_group_key TEXT NOT NULL,
+    event_ids TEXT,
+    event_title TEXT,
     event_time_utc TEXT NOT NULL,
     symbol TEXT NOT NULL,
     direction TEXT NOT NULL,
@@ -138,6 +138,27 @@ CREATE TABLE IF NOT EXISTS naive_trades (
     pnl_pct REAL,
     status TEXT NOT NULL DEFAULT 'CLOSED',
     reason TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(event_group_key, symbol)
+);
+
+-- LIVE: реальні угоди на Bybit (записуються ТІЛЬКИ якщо live_enabled=True)
+CREATE TABLE IF NOT EXISTS live_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_group_key TEXT NOT NULL,
+    event_ids TEXT,
+    event_title TEXT,
+    event_time_utc TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    votes_up INTEGER NOT NULL DEFAULT 0,
+    votes_down INTEGER NOT NULL DEFAULT 0,
+    size_usd REAL NOT NULL,
+    bybit_order_id TEXT,
+    entry_price REAL,
+    entry_ts INTEGER,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    error_message TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(event_group_key, symbol)
 );
@@ -164,6 +185,10 @@ CREATE INDEX IF NOT EXISTS idx_backtest_ts ON backtest_trades(event_time_utc);
 CREATE INDEX IF NOT EXISTS idx_naive_ts ON naive_trades(event_time_utc);
 CREATE INDEX IF NOT EXISTS idx_naive_symbol ON naive_trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_naive_group ON naive_trades(event_group_key);
+
+CREATE INDEX IF NOT EXISTS idx_live_ts ON live_trades(event_time_utc);
+CREATE INDEX IF NOT EXISTS idx_live_symbol ON live_trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_live_status ON live_trades(status);
 """
 
 
@@ -179,7 +204,6 @@ async def get_db():
 
 
 async def _table_sql(db: aiosqlite.Connection, table: str) -> str | None:
-    """Повертає SQL створення таблиці або None, якщо її немає."""
     cur = await db.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?",
         (table,),
@@ -189,29 +213,17 @@ async def _table_sql(db: aiosqlite.Connection, table: str) -> str | None:
 
 
 async def _migrate_backtest_trades(db: aiosqlite.Connection):
-    """
-    FIX: якщо backtest_trades існує зі старою схемою (UNIQUE(event_id, symbol)
-    або UNIQUE(event_time_utc, symbol)), пересоздаємо її з новою
-    UNIQUE(event_time_utc, symbol, direction).
-    Дані backtest не критичні — їх можна перерахувати.
-    """
     sql = await _table_sql(db, "backtest_trades")
     if sql is None:
         return
-
     needs_recreate = (
         "UNIQUE(event_time_utc, symbol, direction)" not in sql
     )
     if not needs_recreate:
         return
-
-    logger.warning(
-        "backtest_trades має стару схему — пересоздаю з "
-        "UNIQUE(event_time_utc, symbol, direction)"
-    )
+    logger.warning("backtest_trades має стару схему — пересоздаю")
     await db.execute("DROP TABLE IF EXISTS backtest_trades")
     await db.commit()
-
     await db.execute("""
         CREATE TABLE backtest_trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,31 +248,21 @@ async def _migrate_backtest_trades(db: aiosqlite.Connection):
         )
     """)
     await db.commit()
-    logger.info("backtest_trades пересоздано з новою схемою")
+    logger.info("backtest_trades пересоздано")
 
 
 async def _migrate_naive_trades(db: aiosqlite.Connection):
-    """
-    FIX: якщо naive_trades існує зі старою схемою (UNIQUE(event_id, symbol))
-    — пересоздаємо з UNIQUE(event_group_key, symbol).
-    """
     sql = await _table_sql(db, "naive_trades")
     if sql is None:
         return
-
     needs_recreate = (
         "UNIQUE(event_group_key, symbol)" not in sql
     )
     if not needs_recreate:
         return
-
-    logger.warning(
-        "naive_trades має стару схему — пересоздаю з "
-        "UNIQUE(event_group_key, symbol)"
-    )
+    logger.warning("naive_trades має стару схему — пересоздаю")
     await db.execute("DROP TABLE IF EXISTS naive_trades")
     await db.commit()
-    # Таблиця буде створена в TABLES_SQL після цього
 
 
 async def init_db():
@@ -272,10 +274,7 @@ async def init_db():
         for table, col, coltype in MIGRATIONS:
             await _add_column_if_missing(db, table, col, coltype)
 
-        # Міграція backtest_trades на нову UNIQUE
         await _migrate_backtest_trades(db)
-
-        # Міграція naive_trades на нову UNIQUE
         await _migrate_naive_trades(db)
 
         await db.executescript(INDEXES_SQL)

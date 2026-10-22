@@ -1,23 +1,15 @@
 """
 "Тупо тест" (naive test) — угода на КОЖНУ high-подію, без фільтрів paper.
 
-Логіка:
-1. Беремо ВСІ high-події з БД (за весь наявний час або за N днів).
-2. Групуємо по хвилині (події в межах ±60 сек = одна група).
-3. Для кожної групи — голосування по expected_dir (з expected.py):
-   - up > down → LONG
-   - down > up → SHORT
-   - рівність → пропуск
-4. Вхід: close на T+1 хв. Вихід: close на T+EXIT_OFFSET_MIN хв.
-5. Розмір: фіксований $X на угоду (не залежить від балансу).
-6. Комісія 0.1% + slippage 0.05% — як у backtest.
-7. На кожен символ (SOL/BTC/ETH) — окрема угода.
-8. НЕ перевіряємо hit_rate, |ret_15m|, MAX_OPEN, SPOT_LONG_ONLY.
+Варіант B: зважене голосування.
+- Кожен up = +1, кожен down = -1.
+- score = votes_up - votes_down.
+- score > 0 → LONG, score < 0 → SHORT, score == 0 → пропуск.
+- Це стійкіше до склеєних подій (4 копії CPI m/m дадуть -4, а не -3).
 
-Пише у окрему таблицю naive_trades — не змішується ні з paper, ні з backtest.
+Пише у окрему таблицю naive_trades.
 """
 
-import json
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -27,7 +19,6 @@ from app.impact.expected import get_expected_direction
 
 logger = logging.getLogger(__name__)
 
-# --- Параметри (дефолти; можна перевизначити через API) ---
 DEFAULT_SYMBOLS = ["SOLUSDT", "BTCUSDT", "ETHUSDT"]
 DEFAULT_SIZE_USD = 10.0
 DEFAULT_INITIAL_BALANCE = 200.0
@@ -35,12 +26,8 @@ COMMISSION_PCT = 0.1
 SLIPPAGE_PCT = 0.05
 ENTRY_OFFSET_MIN = 1
 EXIT_OFFSET_MIN = 60
-GROUP_TOLERANCE_SEC = 60       # події в межах 60 сек = одна група
+GROUP_TOLERANCE_SEC = 60
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _iso_to_ms(iso_str: str) -> Optional[int]:
     try:
@@ -70,10 +57,6 @@ async def _get_close(db, symbol: str, interval: str, target_ts_ms: int,
 
 
 def _group_key(time_utc: str) -> Optional[str]:
-    """
-    Ключ групи: округлюємо time_utc до хвилини (без секунд).
-    "2026-10-15T14:30:45+00:00" → "2026-10-15T14:30"
-    """
     dt = _iso_to_dt(time_utc)
     if dt is None:
         return None
@@ -93,20 +76,16 @@ def _iso_to_dt(iso_str: str) -> Optional[datetime]:
 
 def _vote_direction(votes_up: int, votes_down: int) -> Optional[str]:
     """
-    up > down → 'long'
-    down > up → 'short'
-    рівність (в т.ч. 0:0) → None (пропуск)
+    Варіант B: score = up - down.
+    score > 0 → long, score < 0 → short, score == 0 → None.
     """
-    if votes_up > votes_down:
+    score = votes_up - votes_down
+    if score > 0:
         return "long"
-    if votes_down > votes_up:
+    if score < 0:
         return "short"
     return None
 
-
-# ---------------------------------------------------------------------------
-# Головна функція
-# ---------------------------------------------------------------------------
 
 async def run_naive_test(
     days: Optional[int] = None,
@@ -115,19 +94,6 @@ async def run_naive_test(
     exit_offset_min: int = EXIT_OFFSET_MIN,
     reset: bool = True,
 ) -> dict:
-    """
-    Прогін "тупо тесту".
-
-    Args:
-        days:            обмежити останніми N днями (None = всі)
-        symbols:         список символів (default SOL/BTC/ETH)
-        size_usd:        розмір кожної угоди, $
-        exit_offset_min: через скільки хвилин після події виходити
-        reset:           очистити naive_trades перед прогоном
-
-    Returns:
-        dict зі звітом
-    """
     syms = symbols or DEFAULT_SYMBOLS
     interval = "1"
 
@@ -136,7 +102,6 @@ async def run_naive_test(
             await db.execute("DELETE FROM naive_trades")
             await db.commit()
 
-        # --- 1. Беремо ВСІ high-події ---
         where = ["e.importance = 'high'"]
         params: list = []
         if days:
@@ -156,7 +121,6 @@ async def run_naive_test(
 
         logger.info(f"[naive] всього high-подій: {len(all_events)}")
 
-        # --- 2. Групуємо по хвилині ---
         groups: dict[str, list] = {}
         for ev in all_events:
             gk = _group_key(ev["time_utc"])
@@ -172,9 +136,7 @@ async def run_naive_test(
         def _skip(reason: str):
             skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
 
-        # --- 3. Обробляємо кожну групу ---
         for gk, events_in_group in groups.items():
-            # Голосування по expected_dir (з expected.py)
             votes_up = 0
             votes_down = 0
             titles = []
@@ -193,15 +155,10 @@ async def run_naive_test(
                     votes_up += 1
                 elif direction == "down":
                     votes_down += 1
-                # None або 'flat' — не голосує
 
             trade_direction = _vote_direction(votes_up, votes_down)
             if trade_direction is None:
-                _skip("vote_tie_or_empty")
-                logger.debug(
-                    f"[naive] skip {gk}: votes up={votes_up} down={votes_down} "
-                    f"({', '.join(titles)})"
-                )
+                _skip("vote_tie")
                 continue
 
             event_ts_ms = _iso_to_ms(group_time_utc)
@@ -210,10 +167,9 @@ async def run_naive_test(
                 continue
 
             group_title = " | ".join(titles)
+            score = votes_up - votes_down
 
-            # --- 4. Для кожного символу — окрема угода ---
             for sym in syms:
-                # Дедуплікація
                 cur = await db.execute("""
                     SELECT 1 FROM naive_trades
                     WHERE event_group_key = ? AND symbol = ?
@@ -222,14 +178,10 @@ async def run_naive_test(
                     _skip("duplicate")
                     continue
 
-                # Entry на T+1
                 entry_ts = event_ts_ms + ENTRY_OFFSET_MIN * 60_000
                 entry_price = await _get_close(db, sym, interval, entry_ts)
                 if entry_price is None:
                     _skip("no_entry_candle")
-                    logger.debug(
-                        f"[naive] skip {sym} {gk}: немає свічки на entry"
-                    )
                     continue
 
                 if trade_direction == "long":
@@ -238,14 +190,10 @@ async def run_naive_test(
                     entry_price_eff = entry_price * (1 - SLIPPAGE_PCT / 100)
                 entry_fee = size_usd * (COMMISSION_PCT / 100)
 
-                # Exit на T+exit_offset_min
                 exit_ts = event_ts_ms + exit_offset_min * 60_000
                 exit_price = await _get_close(db, sym, interval, exit_ts)
                 if exit_price is None:
                     _skip("no_exit_candle")
-                    logger.debug(
-                        f"[naive] skip {sym} {gk}: немає свічки на exit"
-                    )
                     continue
 
                 if trade_direction == "long":
@@ -291,13 +239,12 @@ async def run_naive_test(
                     size_usd,
                     pnl,
                     pnl_pct,
-                    f"votes up={votes_up} down={votes_down}",
+                    f"score={score} (up={votes_up} down={votes_down})",
                 ))
                 opened += 1
 
         await db.commit()
 
-        # --- 5. Підсумок ---
         cur = await db.execute("""
             SELECT
                 COUNT(*) AS n,
@@ -346,6 +293,7 @@ async def run_naive_test(
             "size_usd": size_usd,
             "exit_offset_min": exit_offset_min,
             "initial_balance": initial_balance,
+            "vote_mode": "weighted (B)",
         },
         "high_events_total": len(all_events),
         "groups_total": len(groups),

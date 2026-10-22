@@ -1,15 +1,5 @@
 """
-FastAPI-додаток: API для подій, цін, impact, LIVE, Paper Trading, Tools.
-
-Scheduler:
-  - refresh_calendar (day=today) — кожні 15 хв
-  - refresh_calendar (day=today) — кожні 6 год
-  - refresh_calendar (day=today) — о 00:01 UTC щодня
-  - load_history_sync — кожні 24 години
-  - recompute_impact_job — кожні 30 хвилин
-  - paper_engine_job — кожні 1 хв
-  - check_upcoming_events — кожну хвилину (нагадування)
-  - weekly_report_job — неділя 20:00 UTC
+FastAPI-додаток: API для подій, цін, impact, LIVE, Paper Trading, Tools, Naive, LIVE TRADING.
 """
 
 import asyncio
@@ -52,6 +42,14 @@ from app.naive.engine import (
     get_naive_trades,
     get_naive_equity_curve,
     clear_naive,
+)
+from app.live.executor import (
+    process_live_engine,
+    get_bybit_balance,
+    get_live_trades,
+    toggle_live,
+    update_live_size,
+    clear_live,
 )
 
 logging.basicConfig(
@@ -103,7 +101,7 @@ def _iso_to_ms(iso_str: str | None) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Background jobs
+# Background jobs (ті самі + live_engine_job)
 # ---------------------------------------------------------------------------
 async def refresh_calendar(day: str = "today"):
     logger.info(f"Refreshing economic calendar (day={day})...")
@@ -207,8 +205,19 @@ async def paper_engine_job():
         return {"error": str(ex)}
 
 
+async def live_engine_job():
+    """LIVE engine — запускається кожну хвилину. У dry-run режимі тільки логує."""
+    try:
+        stats = await process_live_engine()
+        if stats["opened"] or stats["errors"]:
+            await manager.broadcast({"type": "live_updated", **stats})
+        return stats
+    except Exception as ex:
+        logger.exception(f"LIVE engine failed: {ex}")
+        return {"error": str(ex)}
+
+
 async def check_upcoming_events():
-    """Кожну хвилину перевіряє high-події в межах 4-6 хв від зараз."""
     try:
         now = datetime.now(timezone.utc)
         lo = (now + timedelta(minutes=4)).isoformat()
@@ -285,6 +294,8 @@ async def lifespan(app: FastAPI):
                       minutes=30, id="impact_recompute_auto")
     scheduler.add_job(paper_engine_job, "interval",
                       minutes=1, id="paper_engine")
+    scheduler.add_job(live_engine_job, "interval",
+                      minutes=1, id="live_engine")
     scheduler.add_job(check_upcoming_events, "interval",
                       minutes=1, id="check_upcoming")
     scheduler.add_job(weekly_report_job, CronTrigger(day_of_week="sun", hour=20, minute=0),
@@ -316,7 +327,6 @@ async def index():
 
 @app.get("/tools/paper_diagnostics")
 async def tools_paper_diagnostics():
-    """FIX: діагностика, чому paper engine не відкриває угоди."""
     now = datetime.now(timezone.utc)
     now_ms = int(now.timestamp() * 1000)
 
@@ -379,6 +389,53 @@ async def tools_paper_diagnostics():
         "candidates_in_entry_window": in_window,
         "entry_window_min": 30,
     }
+
+
+# ============================================================================
+# API: LIVE TRADING
+# ============================================================================
+@app.get("/live/status")
+async def api_live_status():
+    """Поточний стан LIVE: увімкнено/вимкнено, розмір угоди, баланс Bybit."""
+    bal = await get_bybit_balance()
+    return {
+        "live_enabled": settings.live_enabled,
+        "trade_size_usd": settings.live_trade_size_usd,
+        "max_pct_of_balance": settings.live_max_pct_of_balance,
+        "bybit": bal,
+        "api_keys_configured": bool(settings.bybit_api_key and settings.bybit_api_secret),
+        "testnet": settings.bybit_testnet,
+    }
+
+
+@app.post("/live/toggle")
+async def api_live_toggle(enabled: bool = Body(..., embed=True)):
+    return await toggle_live(enabled)
+
+
+@app.post("/live/size")
+async def api_live_size(size_usd: float = Body(..., embed=True)):
+    if size_usd < 1 or size_usd > 1000:
+        return {"error": "size_usd must be between 1 and 1000"}
+    return await update_live_size(size_usd)
+
+
+@app.get("/live/trades")
+async def api_live_trades(limit: int = 200):
+    return await get_live_trades(limit=limit)
+
+
+@app.post("/live/clear")
+async def api_live_clear():
+    return await clear_live()
+
+
+@app.post("/live/run")
+async def api_live_run():
+    """Ручний запуск LIVE engine (для тесту)."""
+    stats = await process_live_engine()
+    await manager.broadcast({"type": "live_updated", **stats})
+    return stats
 
 
 # ============================================================================
@@ -587,7 +644,6 @@ async def api_events_upcoming_high(days: int = 7, limit: int = 20):
 
 @app.get("/events/next_high")
 async def api_events_next_high():
-    """Повертає найближчу high-подію і скільки до неї часу."""
     now = datetime.now(timezone.utc)
 
     async with get_db() as db:
@@ -622,7 +678,6 @@ async def api_events_next_high():
 
 @app.get("/events/compare")
 async def api_events_compare(days_back: int = 30, limit: int = 100):
-    """Порівняння SOL/BTC/ETH по кожній події."""
     from_iso = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
 
     async with get_db() as db:
@@ -703,7 +758,7 @@ async def api_prices_range(hours: int = 24, symbol: str | None = None):
 
 
 # ============================================================================
-# API: CSV export
+# API: CSV export (без змін, окрім доданого live)
 # ============================================================================
 @app.get("/events/export.csv")
 async def api_events_export_csv(
@@ -844,7 +899,7 @@ async def api_impact_cross_asset(event_id: int):
 
 
 # ============================================================================
-# API: LIVE
+# API: LIVE (публічний, для графіка)
 # ============================================================================
 async def _build_live_current() -> dict:
     now_ms = int(_time.time() * 1000)
@@ -914,7 +969,7 @@ async def api_live_current():
 
 
 # ============================================================================
-# API: Paper Trading
+# API: Paper Trading (без змін)
 # ============================================================================
 @app.get("/paper/account")
 async def api_paper_account():
@@ -966,7 +1021,7 @@ async def api_paper_run():
 
 
 # ============================================================================
-# API: Tools
+# API: Tools (без змін)
 # ============================================================================
 @app.post("/tools/recompute_impact")
 async def tools_recompute_impact(limit: int = Query(1000, ge=1, le=10000)):
@@ -1099,7 +1154,6 @@ async def tools_db_stats():
 
 @app.get("/tools/db_tables")
 async def tools_db_tables():
-    """Розмір таблиць БД."""
     import os
     from app.config import settings as _settings
 
@@ -1151,7 +1205,6 @@ async def tools_db_tables():
 
 @app.get("/tools/logs")
 async def tools_logs(lines: int = 100, grep: str | None = None):
-    """Останні N рядків логів з опційним grep."""
     try:
         cmd = ["journalctl", "-u", "newsbot.service", "-n", str(lines),
                "--no-pager", "-o", "cat"]

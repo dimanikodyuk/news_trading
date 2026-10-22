@@ -153,6 +153,7 @@
     <div class="tab" data-tab="tools">🔧 Інструменти</div>
     <div class="tab" data-tab="backtest">🧪 Backtest</div>
     <div class="tab" data-tab="naive">🎲 Тупо тест</div>
+    <div class="tab" data-tab="live-trading">🔴 LIVE TRADING</div>
     <div class="tab" data-tab="help">Довідка</div>
   </div>
 
@@ -663,6 +664,95 @@
         </tr></thead>
         <tbody id="nv-trades-tbody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ==================== LIVE TRADING ==================== -->
+  <div id="tab-live-trading" style="display:none">
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+      <h1 class="text-2xl font-bold">🔴 LIVE TRADING</h1>
+      <div class="text-sm text-slate-500">
+        Реальні Market ордери на Bybit Spot (SOL + BTC)
+      </div>
+    </div>
+
+    <!-- Статус + баланс -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">LIVE статус</div>
+        <div class="text-2xl font-bold" id="live-status-text">—</div>
+        <div class="hint" id="live-status-hint">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Bybit USDT баланс</div>
+        <div class="text-2xl font-bold font-mono" id="live-balance">—</div>
+        <div class="hint" id="live-balance-hint">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">Розмір угоди</div>
+        <div class="text-2xl font-bold font-mono" id="live-size">—</div>
+        <div class="hint" id="live-size-hint">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-sm text-slate-400">API ключі</div>
+        <div class="text-2xl font-bold" id="live-keys">—</div>
+        <div class="hint" id="live-keys-hint">—</div>
+      </div>
+    </div>
+
+    <!-- Управління -->
+    <div class="card p-4 mb-6">
+      <h2 class="section-title">⚙ Управління</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Розмір угоди, $</label>
+          <div class="flex gap-2">
+            <input type="number" id="live-size-input" value="5" min="1" max="1000" step="1"
+                   class="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
+            <button onclick="updateLiveSize()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">Зберегти</button>
+          </div>
+          <div class="hint">Не більше 10% від балансу на одну угоду</div>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Увімкнути LIVE</label>
+          <button onclick="toggleLive(true)" id="live-btn-on"
+                  class="px-4 py-2 bg-red-700 hover:bg-red-600 rounded text-sm font-semibold w-full">
+            🔴 УВІМКНУТИ (реальні гроші)
+          </button>
+          <button onclick="toggleLive(false)" id="live-btn-off"
+                  class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm w-full mt-1">
+            ⏹ ВИМКНУТИ
+          </button>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Дії</label>
+          <button onclick="runLiveEngine()" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm w-full mb-1">▶ Запустити engine вручну</button>
+          <button onclick="clearLive()" class="px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm w-full">🗑 Очистити live_trades</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Угоди -->
+    <div class="card p-4" id="live-trades-card" style="display:none">
+      <h2 class="section-title">📋 Live угоди</h2>
+      <table>
+        <thead><tr>
+          <th>Час <span class="time-utc">(Київ / UTC)</span></th>
+          <th>Подія</th>
+          <th>Символ</th>
+          <th class="text-center">Напрямок</th>
+          <th class="text-center">Голоси</th>
+          <th class="text-right">Розмір</th>
+          <th class="text-right">Entry</th>
+          <th class="text-center">Статус</th>
+          <th class="text-right">Order ID</th>
+        </tr></thead>
+        <tbody id="live-trades-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="card p-4 mt-6" id="live-empty-card">
+      <div class="text-slate-500 text-center">Немає live-угод. Увімкни LIVE і дочекайся наступної high-події.</div>
     </div>
   </div>
 
@@ -1639,6 +1729,84 @@ async function clearBacktest() {
   ['bt-summary-card','bt-skips-card','bt-by-symbol-card','bt-by-direction-card','bt-equity-card','bt-trades-card'].forEach(id => document.getElementById(id).style.display = 'none');
   if (btEquityChart) { btEquityChart.destroy(); btEquityChart = null; }
 }
+
+// ==================== LIVE TRADING ====================
+async function loadLiveStatus() {
+  try {
+    const s = await api('/live/status');
+    document.getElementById('live-status-text').textContent = s.live_enabled ? '🔴 УВІМКНЕНО' : '⏹ ВИМКНЕНО';
+    document.getElementById('live-status-text').className = 'text-2xl font-bold ' + (s.live_enabled ? 'down' : 'flat');
+    document.getElementById('live-status-hint').textContent = s.live_enabled ? 'Реальні ордери відправляються' : 'Dry-run: тільки логування';
+    document.getElementById('live-balance').textContent = s.bybit.usdt_available != null ? '$' + s.bybit.usdt_available.toFixed(2) : '—';
+    document.getElementById('live-balance-hint').textContent = s.bybit.error ? s.bybit.error : 'Available USDT';
+    document.getElementById('live-size').textContent = '$' + s.trade_size_usd.toFixed(2);
+    document.getElementById('live-size-hint').textContent = 'Max ' + s.max_pct_of_balance + '% від балансу';
+    document.getElementById('live-keys').textContent = s.api_keys_configured ? '✓' : '✗';
+    document.getElementById('live-keys').className = 'text-2xl font-bold ' + (s.api_keys_configured ? 'up' : 'down');
+    document.getElementById('live-keys-hint').textContent = s.testnet ? 'Testnet' : 'Mainnet';
+    document.getElementById('live-size-input').value = s.trade_size_usd;
+  } catch (e) { console.error('loadLiveStatus failed', e); }
+}
+async function toggleLive(enabled) {
+  if (enabled && !confirm('⚠️ УВАГА! Увімкнути РЕАЛЬНУ торгівлю? Будуть відправлятися справжні ордери на Bybit.')) return;
+  if (!enabled && !confirm('Вимкнути LIVE торгівлю?')) return;
+  await api('/live/toggle', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled}) });
+  loadLiveStatus();
+  loadLiveTrades();
+}
+async function updateLiveSize() {
+  const size = parseFloat(document.getElementById('live-size-input').value);
+  if (!size || size < 1) { alert('Мінімум $1'); return; }
+  await api('/live/size', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({size_usd: size}) });
+  loadLiveStatus();
+}
+async function runLiveEngine() {
+  if (!confirm('Запустити LIVE engine вручну?')) return;
+  const r = await api('/live/run', { method: 'POST' });
+  alert('Готово: ' + JSON.stringify(r));
+  loadLiveTrades();
+}
+async function clearLive() {
+  if (!confirm('Видалити всі live_trades?')) return;
+  await api('/live/clear', { method: 'POST' });
+  loadLiveTrades();
+}
+async function loadLiveTrades() {
+  try {
+    const trades = await api('/live/trades?limit=200');
+    const card = document.getElementById('live-trades-card');
+    const empty = document.getElementById('live-empty-card');
+    const tbody = document.getElementById('live-trades-tbody');
+    if (trades.length === 0) { card.style.display = 'none'; empty.style.display = ''; return; }
+    card.style.display = ''; empty.style.display = 'none';
+    tbody.innerHTML = trades.map(t => {
+      const statusCls = t.status === 'FILLED' ? 'badge-hit' : t.status === 'REJECTED' ? 'badge-miss' : t.status === 'DRY_RUN' ? 'badge-na' : 'badge-open';
+      return `<tr>
+        <td class="font-mono text-xs">${fmtBothFull(t.event_time_utc)}</td>
+        <td class="text-cyan-400">${t.event_title}</td>
+        <td>${symbolBadge(t.symbol)}</td>
+        <td class="text-center">${dirBadge(t.direction)}</td>
+        <td class="text-center font-mono text-xs"><span class="up">${t.votes_up}</span>/<span class="down">${t.votes_down}</span></td>
+        <td class="text-right font-mono">$${t.size_usd.toFixed(2)}</td>
+        <td class="text-right font-mono">${t.entry_price ? fmtUsd4(t.entry_price) : '—'}</td>
+        <td class="text-center"><span class="${statusCls} px-2 py-0.5 rounded text-xs">${t.status}</span></td>
+        <td class="text-right font-mono text-xs">${t.bybit_order_id || '—'}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { console.error('loadLiveTrades failed', e); }
+}
+// Додати обробку табу:
+document.querySelector('.tab[data-tab="live-trading"]').onclick = () => {
+  document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
+  document.querySelector('.tab[data-tab="live-trading"]').classList.add('active');
+  ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','naive','live-trading','help'].forEach(name => {
+    const el = document.getElementById('tab-' + name);
+    if (el) el.style.display = name === 'live-trading' ? '' : 'none';
+  });
+  loadLiveStatus();
+  loadLiveTrades();
+};
+
 
 // ==================== NAIVE ("тупо тест") ====================
 let nvEquityChart = null;
