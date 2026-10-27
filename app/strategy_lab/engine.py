@@ -82,7 +82,7 @@ async def research_backtest(strategy='momentum', symbol='BTCUSDT', entry_min=1, 
             start=t-60000; end=t+(entry_min+hold_min)*60000
             cur=await db.execute('SELECT ts,open,close,confirm FROM prices WHERE symbol=? AND interval=? AND ts BETWEEN ? AND ? AND confirm=1 ORDER BY ts',(symbol,'1',start,end))
             candles={int((r['ts']-t)//60000):dict(r) for r in await cur.fetchall() if (r['ts']-t)%60000==0}
-            if any(i not in candles for i in (-1, *range(entry_min),entry_min,entry_min+hold_min)):
+            if any(i not in candles for i in (-1, *range(entry_min + hold_min + 1))):
                 skipped['missing_closed_candles']+=1; continue
             direction=signal(strategy,ev,candles,entry_min)
             if not direction: skipped['no_signal']+=1; continue

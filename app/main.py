@@ -1283,3 +1283,29 @@ async def v2_research_backtest(strategy: str = 'momentum', symbol: str = 'BTCUSD
         return await research_backtest(strategy,symbol,entry_min,hold_min,size_usd,fee_bps,slippage_bps,long_only,limit_events)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc)) from exc
+
+
+@app.get('/api/v2/research/compare')
+async def v2_research_compare(symbol: str = 'BTCUSDT', entry_min: int = 2, hold_min: int = 15,
+                              size_usd: float = 10, fee_bps: float = 10, slippage_bps: float = 5,
+                              limit_events: int = 5000):
+    """Read-only, no auto-selection for live execution. Results are not investment signals."""
+    if symbol not in SYMBOLS:
+        raise HTTPException(status_code=422, detail='invalid symbol')
+    results = []
+    for strategy in STRATEGIES:
+        try:
+            result = await research_backtest(strategy, symbol, entry_min, hold_min,
+                                             size_usd, fee_bps, slippage_bps, True, limit_events)
+            results.append({
+                'strategy': strategy, 'overall': result['overall'],
+                'train': result['train_70pct'], 'holdout': result['holdout_30pct'],
+                'skipped': result['skipped'], 'exploratory_only': result['exploratory_oracle_actual'],
+            })
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Rank by holdout P&L only for display; no automated trading or tuning.
+    results.sort(key=lambda r: (r['holdout']['trades'] >= 10 and not r['exploratory_only'],
+                                r['holdout']['net_pnl_usd']), reverse=True)
+    return {'symbol': symbol, 'results': results, 'live_execution': False,
+            'warning': 'Small samples and repeated parameter tuning invalidate holdout inference. News Surprise has unverified release timestamps.'}

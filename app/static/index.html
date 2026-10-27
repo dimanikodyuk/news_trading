@@ -197,9 +197,29 @@
     <div class="tab" data-tab="heatmap">Heatmap</div>
     <div class="tab" data-tab="tools">🔧 Інструменти</div>
     <div class="tab" data-tab="backtest">🧪 Backtest</div>
+    <div class="tab" data-tab="strategy-lab">🧠 Strategy Lab v2</div>
     <div class="tab" data-tab="naive">🎲 Тупо тест</div>
     <div class="tab" data-tab="live-trading">🔴 LIVE TRADING</div>
     <div class="tab" data-tab="help">Довідка</div>
+  </div>
+
+
+  <div id="tab-strategy-lab" style="display:none" class="space-y-4">
+    <div class="rounded-xl bg-slate-800 p-5 border border-slate-700">
+      <h2 class="text-xl font-bold text-cyan-400 mb-2">🧠 Strategy Lab v2 — дослідження</h2>
+      <p class="text-sm text-amber-300 mb-4">Тільки історичний аналіз. News Surprise — експериментальна модель із непідтвердженим часом публікації Actual. LIVE не виконується.</p>
+      <div class="flex flex-wrap gap-3 items-end">
+        <label class="text-sm">Актив<br><select id="lab-symbol" class="bg-slate-900 border border-slate-600 rounded p-2"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option></select></label>
+        <label class="text-sm">Вхід, хв<br><input id="lab-entry" type="number" min="2" max="10" value="2" class="bg-slate-900 border border-slate-600 rounded p-2 w-20"></label>
+        <label class="text-sm">Утримання, хв<br><input id="lab-hold" type="number" min="1" max="120" value="15" class="bg-slate-900 border border-slate-600 rounded p-2 w-24"></label>
+        <label class="text-sm">Комісія, bps/бік<br><input id="lab-fee" type="number" min="0" max="100" value="10" class="bg-slate-900 border border-slate-600 rounded p-2 w-24"></label>
+        <label class="text-sm">Прослизання, bps/бік<br><input id="lab-slip" type="number" min="0" max="100" value="5" class="bg-slate-900 border border-slate-600 rounded p-2 w-24"></label>
+        <button onclick="runStrategyLab()" class="bg-cyan-700 hover:bg-cyan-600 px-4 py-2 rounded">▶ Порівняти</button>
+      </div>
+      <p id="lab-status" class="mt-4 text-sm text-slate-300">Натисни «Порівняти».</p>
+    </div>
+    <div class="overflow-x-auto bg-slate-800 rounded-xl p-4"><table class="w-full text-sm text-left"><thead><tr class="text-cyan-300"><th class="p-2">Стратегія</th><th class="p-2">Угоди (test)</th><th class="p-2">P&L (test)</th><th class="p-2">Win rate</th><th class="p-2">Profit factor</th><th class="p-2">Просадка</th><th class="p-2">Обмеження</th></tr></thead><tbody id="lab-rows"><tr><td colspan="7" class="p-3">Ще немає результатів.</td></tr></tbody></table></div>
+    <div class="bg-slate-800 rounded-xl p-4 text-sm text-slate-400">Результати на 30% історії — описові, а не гарантія. Повторний підбір параметрів за цими результатами призводить до перенавчання. Для торгівлі потрібен окремий forward-test із зафіксованими параметрами.</div>
   </div>
 
   <!-- ==================== LIVE ==================== -->
@@ -1103,7 +1123,7 @@ function fmtStatLast(tsStr) {
 }
 
 // ===== TABS =====
-const ALL_TABS = ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','naive','live-trading','help'];
+const ALL_TABS = ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','strategy-lab','naive','live-trading','help'];
 document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
@@ -1119,6 +1139,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
     if (t.dataset.tab === 'compare') loadCompare();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
+    if (t.dataset.tab === 'strategy-lab') { /* manual run, avoids expensive queries on navigation */ }
     if (t.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
     if (t.dataset.tab === 'naive') { loadNaiveTrades(); loadNaiveEquity(); }
     if (t.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); loadLiveSummary(); loadLiveEquity(); }
@@ -2406,6 +2427,36 @@ setInterval(async () => {
   try { const data = await api('/prices/latest?limit=3'); for (const p of data) currentPrices[p.symbol] = p.close; } catch (_) {}
 }, 10000);
 setInterval(loadNextHigh, 60000);
+</script>
+
+<script>
+async function runStrategyLab() {
+  const status = document.getElementById('lab-status');
+  const body = document.getElementById('lab-rows');
+  status.textContent = 'Розрахунок...';
+  body.innerHTML = '';
+  const params = new URLSearchParams({symbol: document.getElementById('lab-symbol').value,
+    entry_min: document.getElementById('lab-entry').value,
+    hold_min: document.getElementById('lab-hold').value,
+    fee_bps: document.getElementById('lab-fee').value,
+    slippage_bps: document.getElementById('lab-slip').value});
+  try {
+    const response = await fetch('/api/v2/research/compare?' + params);
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data.detail || data));
+    for (const row of data.results) {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-700';
+      const values = [row.strategy, row.holdout.trades, row.holdout.net_pnl_usd,
+        row.holdout.win_rate_pct ?? '—', row.holdout.profit_factor ?? '—',
+        row.holdout.max_drawdown_usd, row.exploratory_only ? '⚠️ Oracle / exploratory' :
+        (row.holdout.trades < 10 ? '⚠️ Мала вибірка' : 'Research only')];
+      for (const value of values) { const td = document.createElement('td'); td.className='p-2'; td.textContent=String(value); tr.appendChild(td); }
+      body.appendChild(tr);
+    }
+    status.textContent = 'Готово. Усі три стратегії — тільки дослідницькі. ' + data.warning;
+  } catch (e) { status.textContent = 'Помилка: ' + e.message; }
+}
 </script>
 </body>
 </html>
