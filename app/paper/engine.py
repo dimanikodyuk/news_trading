@@ -191,9 +191,7 @@ async def _open_new_trades(db) -> int:
               WHERE ei.event_id = e.id
                 AND ei.symbol IN ('SOLUSDT', 'BTCUSDT')
                 AND ei.expected_dir IS NOT NULL
-                AND ei.hit IN ('HIT', 'MISS')
                 AND ei.price_t1 IS NOT NULL
-                AND ei.ret_15m IS NOT NULL
           )
           AND (
               SELECT COUNT(*) FROM paper_trades pt
@@ -243,13 +241,14 @@ async def _open_new_trades(db) -> int:
             JOIN events e ON e.id = ei.event_id
             WHERE ei.symbol = 'SOLUSDT'
               AND LOWER(TRIM(e.title)) = ?
-        """, (norm_title,))
+              AND julianday(e.time_utc) + 60.0/1440 < julianday(?)
+        """, (norm_title, c["time_utc"]))
         hr = await cur.fetchone()
         hits = hr["hits"] or 0
         misses = hr["misses"] or 0
         total = hits + misses
 
-        if total < MIN_EVENTS_FOR_TRUST:
+        if total < max(5, MIN_EVENTS_FOR_TRUST):
             logger.info(
                 f"[paper] skip '{c['title']}': hit_rate n={total} < {MIN_EVENTS_FOR_TRUST}"
             )
@@ -287,12 +286,17 @@ async def _open_new_trades(db) -> int:
                 logger.debug(f"[paper] skip {sym} '{c['title']}': немає impact row")
                 continue
 
-            ret_15 = row["ret_15m"]
-            if ret_15 is None or abs(ret_15) < PAPER_MIN_MOVE_PCT:
-                logger.info(
-                    f"[paper] skip {sym} '{c['title']}': "
-                    f"|ret_15m|={abs(ret_15 or 0):.3f}% < {PAPER_MIN_MOVE_PCT}%"
-                )
+            # Never filter an entry using a future T+15 outcome.
+            # Paper mode waits for a causally observable one-minute move.
+            cur = await db.execute("""
+                SELECT close FROM prices WHERE symbol=? AND interval='1'
+                  AND ts=? AND confirm=1
+            """, (sym, event_ts))
+            before = await cur.fetchone()
+            if before is None or float(before["close"]) <= 0:
+                continue
+            observed_move = (float(row["price_t1"]) / float(before["close"]) - 1) * 100
+            if abs(observed_move) < PAPER_MIN_MOVE_PCT:
                 continue
 
             direction = "long" if row["expected_dir"] == "up" else "short"
@@ -302,7 +306,17 @@ async def _open_new_trades(db) -> int:
                 )
                 continue
 
-            entry_price = float(row["price_t1"])
+            # A live paper order enters at the latest known confirmed price,
+            # never at the historical T+1 price when processing late.
+            cur = await db.execute("""SELECT ts, close FROM prices
+                WHERE symbol=? AND interval='1' AND confirm=1 AND ts<=?
+                ORDER BY ts DESC LIMIT 1""", (sym, now_ms - 60_000))
+            latest = await cur.fetchone()
+            if latest is None or now_ms - latest["ts"] > 180_000:
+                continue
+            entry_price = float(latest["close"])
+            entry_ts = int(latest["ts"]) + 60_000
+            ret_15 = observed_move
 
             if direction == "long":
                 entry_price_eff = entry_price * (1 + SLIPPAGE_PCT / 100)
@@ -319,7 +333,7 @@ async def _open_new_trades(db) -> int:
             """, (
                 c["event_id"], sym, direction, entry_ts,
                 entry_price_eff, entry_fee, TRADE_SIZE_USD,
-                f"hit_rate={hit_rate:.0f}% n={total} |ret15|={abs(ret_15):.2f}%"
+                f"past_hit_rate={hit_rate:.0f}% n={total} pre_entry_move={observed_move:+.2f}%"
             ))
 
             await db.execute("""
@@ -337,14 +351,14 @@ async def _open_new_trades(db) -> int:
                 f"Подія: {c['title']}\n"
                 f"Очікуваний напрямок: {row['expected_dir']}\n"
                 f"Hit rate: {hit_rate:.0f}% (n={total})\n"
-                f"Ret +15хв: {ret_15:+.3f}%\n"
+                f"Observed move: {observed_move:+.3f}%\n"
                 f"Вхід: ${entry_price_eff:.4f}\n"
                 f"Розмір: ${TRADE_SIZE_USD:.2f}"
             )
             await _notify(text)
             logger.info(
                 f"[paper] opened {direction} {sym} on event {c['event_id']} "
-                f"@ {entry_price_eff:.4f} (hit_rate={hit_rate:.0f}%, ret15={ret_15:+.3f}%)"
+                f"@ {entry_price_eff:.4f} (hit_rate={hit_rate:.0f}%, observed_move={observed_move:+.3f}%)"
             )
 
     return opened

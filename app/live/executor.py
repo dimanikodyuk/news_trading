@@ -172,7 +172,10 @@ async def process_live_engine() -> dict:
 
     Повертає статистику: {"opened": N, "skipped": M, "errors": K, "dry_run": bool}
     """
-    stats = {"opened": 0, "skipped": 0, "errors": 0, "dry_run": not settings.live_enabled}
+    # Safety interlock: LIVE execution is intentionally disabled in this release.
+    # A working dry-run must not be interpreted as exchange execution readiness.
+    settings.live_enabled = False
+    stats = {"opened": 0, "skipped": 0, "errors": 0, "dry_run": True}
 
     # Перевірка балансу (тільки якщо LIVE увімкнено)
     available_balance = None
@@ -409,7 +412,9 @@ async def toggle_live(enabled: bool) -> dict:
     Пише в settings.live_enabled (в пам'яті; для постійного — треба .env).
     Повертає поточний стан.
     """
-    settings.live_enabled = enabled
+    if enabled:
+        raise ValueError("LIVE trading is locked pending execution/reconciliation audit")
+    settings.live_enabled = False
     logger.warning(f"[LIVE] LIVE_ENABLED = {enabled}")
     return {"live_enabled": enabled}
 

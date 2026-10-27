@@ -412,7 +412,10 @@ async def api_live_status():
 
 @app.post("/live/toggle")
 async def api_live_toggle(enabled: bool = Body(..., embed=True)):
-    return await toggle_live(enabled)
+    if enabled:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="LIVE trading locked: dry-run only")
+    return await toggle_live(False)
 
 
 @app.post("/live/size")
@@ -1265,3 +1268,18 @@ async def ws_endpoint(ws: WebSocket):
             await ws.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(ws)
+
+# v2 research-only API. No live orders, no database writes.
+from app.strategy_lab.engine import research_backtest, STRATEGIES, SYMBOLS
+from fastapi import HTTPException
+
+@app.get('/api/v2/strategies')
+async def v2_strategies():
+    return {'strategies':STRATEGIES,'symbols':SYMBOLS,'live_execution':False,'warning':'News Surprise assumes actual values available at release; timestamps unverified.'}
+
+@app.get('/api/v2/research/backtest')
+async def v2_research_backtest(strategy: str = 'momentum', symbol: str = 'BTCUSDT', entry_min: int = 1, hold_min: int = 15, size_usd: float = 10, fee_bps: float = 10, slippage_bps: float = 5, long_only: bool = True, limit_events: int = 5000):
+    try:
+        return await research_backtest(strategy,symbol,entry_min,hold_min,size_usd,fee_bps,slippage_bps,long_only,limit_events)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc)) from exc

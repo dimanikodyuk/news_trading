@@ -54,7 +54,7 @@ async def _get_close(db, symbol, interval, target_ts_ms, tolerance_min=3):
     return float(row["close"]) if row else None
 
 
-async def _hit_rate(db, title: str) -> tuple[int, int, float]:
+async def _hit_rate(db, title: str, before_time: str) -> tuple[int, int, float]:
     cur = await db.execute("""
         SELECT
             SUM(CASE WHEN ei.hit='HIT' THEN 1 ELSE 0 END) AS hits,
@@ -63,7 +63,8 @@ async def _hit_rate(db, title: str) -> tuple[int, int, float]:
         JOIN events e ON e.id = ei.event_id
         WHERE ei.symbol = 'SOLUSDT'
           AND LOWER(TRIM(e.title)) = ?
-    """, (title.strip().lower(),))
+          AND julianday(e.time_utc) + 60.0/1440 < julianday(?)
+    """, (title.strip().lower(), before_time))
     r = await cur.fetchone()
     hits = r["hits"] or 0
     misses = r["misses"] or 0
@@ -111,7 +112,6 @@ async def run_backtest(
                     AND ei.expected_dir IS NOT NULL
                     AND ei.hit IN ('HIT', 'MISS')
                     AND ei.price_t1 IS NOT NULL
-                    AND ei.ret_15m IS NOT NULL
               )
             ORDER BY e.time_utc ASC
         """, params)
@@ -138,7 +138,7 @@ async def run_backtest(
                 _skip("bad_time", c["title"])
                 continue
 
-            hits, misses, rate = await _hit_rate(db, c["title"])
+            hits, misses, rate = await _hit_rate(db, c["title"], c["time_utc"])
             if hits + misses < min_events:
                 _skip("n_too_small",
                       f"{c['title']} n={hits+misses} < {min_events}")
@@ -162,10 +162,19 @@ async def run_backtest(
                     _skip("no_impact", f"{c['title']} {sym}")
                     continue
 
-                ret_15 = row["ret_15m"]
-                if ret_15 is None or abs(ret_15) < min_move_pct:
-                    _skip("move_too_small",
-                          f"{c['title']} {sym} |ret15|={abs(ret_15 or 0):.3f}% < {min_move_pct}%")
+                # Causal momentum: only candle data available by entry time.
+                # min_move_pct is now the threshold for the PRE-ENTRY move,
+                # not a future 15-minute return.
+                pre_ts = event_ts
+                pre_price = await _get_close(db, sym, "1", pre_ts, tolerance_min=0)
+                entry_ts = event_ts + ENTRY_OFFSET_MIN * 60_000
+                entry_price = await _get_close(db, sym, "1", entry_ts, tolerance_min=0)
+                if not pre_price or not entry_price:
+                    _skip("missing_causal_candles")
+                    continue
+                observed_move = (entry_price / pre_price - 1) * 100
+                if abs(observed_move) < min_move_pct:
+                    _skip("move_too_small")
                     continue
 
                 direction = "long" if row["expected_dir"] == "up" else "short"
@@ -190,8 +199,6 @@ async def run_backtest(
                           f"{c['time_utc']} {sym} {direction} (вже є)")
                     continue
 
-                entry_ts = event_ts + ENTRY_OFFSET_MIN * 60_000
-                entry_price = await _get_close(db, sym, "1", entry_ts)
                 if entry_price is None:
                     _skip("no_entry_candle",
                           f"{c['title']} {sym} entry_ts={entry_ts}")
@@ -204,7 +211,7 @@ async def run_backtest(
                 entry_fee = trade_size_usd * (COMMISSION_PCT / 100)
 
                 exit_ts = event_ts + exit_offset_min * 60_000
-                exit_price = await _get_close(db, sym, "1", exit_ts)
+                exit_price = await _get_close(db, sym, "1", exit_ts, tolerance_min=0)
                 if exit_price is None:
                     _skip("no_exit_candle",
                           f"{c['title']} {sym} exit_ts={exit_ts}")
@@ -239,7 +246,7 @@ async def run_backtest(
                     entry_ts, entry_price_eff, entry_fee,
                     exit_ts, exit_price_eff, exit_fee,
                     trade_size_usd, pnl, pnl_pct,
-                    f"hit_rate={rate:.0f}% |ret15|={abs(ret_15):.2f}%",
+                    f"past_hit_rate={rate:.0f}% |pre_entry_move|={abs(observed_move):.2f}%",
                 ))
                 opened += 1
 
