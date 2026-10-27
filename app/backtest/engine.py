@@ -83,8 +83,11 @@ async def run_backtest(
     spot_long_only: bool = SPOT_LONG_ONLY,
     exit_offset_min: int = EXIT_OFFSET_MIN,
     trade_size_usd: float = TRADE_SIZE_USD,
+    mode: str = "walk_forward",
     direction_filter: str | None = None,   # NEW: "long" | "short" | None
 ) -> dict:
+    if mode not in ("research", "walk_forward", "validated"):
+        raise ValueError("mode must be research, walk_forward or validated")
     syms = symbols or TRADE_SYMBOLS
     if direction_filter not in (None, "long", "short"):
         raise ValueError(f"direction_filter must be 'long'/'short'/None, got {direction_filter!r}")
@@ -139,11 +142,11 @@ async def run_backtest(
                 continue
 
             hits, misses, rate = await _hit_rate(db, c["title"], c["time_utc"])
-            if hits + misses < min_events:
+            if mode != "research" and hits + misses < (max(5, min_events) if mode == "validated" else min_events):
                 _skip("n_too_small",
                       f"{c['title']} n={hits+misses} < {min_events}")
                 continue
-            if rate < hit_rate_threshold:
+            if mode != "research" and rate < hit_rate_threshold:
                 _skip("hit_rate_low",
                       f"{c['title']} rate={rate:.0f}% < {hit_rate_threshold}%")
                 continue
@@ -312,6 +315,7 @@ async def run_backtest(
 
     return {
         "params": {
+            "mode": mode,
             "days": days,
             "hit_rate_threshold": hit_rate_threshold,
             "min_move_pct": min_move_pct,

@@ -538,7 +538,8 @@ async def api_backtest_run(
     reset: bool = True,
     hit_rate_threshold: float = Query(60.0, ge=0, le=100),
     min_move_pct: float = Query(0.30, ge=0, le=10),
-    min_events: int = Query(1, ge=1, le=50),
+    min_events: int = Query(1, ge=0, le=50),
+    mode: str = Query("walk_forward"),
     symbols: str = Query("SOLUSDT,BTCUSDT"),
     spot_long_only: bool = True,
     exit_offset_min: int = Query(60, ge=1, le=240),
@@ -548,7 +549,7 @@ async def api_backtest_run(
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     return await run_backtest(
         days=days, reset=reset,
-        hit_rate_threshold=hit_rate_threshold,
+        mode=mode, hit_rate_threshold=hit_rate_threshold,
         min_move_pct=min_move_pct, min_events=min_events,
         symbols=syms, spot_long_only=spot_long_only,
         exit_offset_min=exit_offset_min,
@@ -1309,3 +1310,15 @@ async def v2_research_compare(symbol: str = 'BTCUSDT', entry_min: int = 2, hold_
                                 r['holdout']['net_pnl_usd']), reverse=True)
     return {'symbol': symbol, 'results': results, 'live_execution': False,
             'warning': 'Small samples and repeated parameter tuning invalidate holdout inference. News Surprise has unverified release timestamps.'}
+
+
+# v2.1: read-only diagnostics and release clusters.
+from app.research_v21 import diagnostics_v21, clusters_v21
+
+@app.get('/api/v2.1/diagnostics')
+async def v21_diagnostics():
+    return await diagnostics_v21()
+
+@app.get('/api/v2.1/clusters')
+async def v21_clusters(limit: int = Query(100, ge=1, le=1000)):
+    return await clusters_v21(limit)
