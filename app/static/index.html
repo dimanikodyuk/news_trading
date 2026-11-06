@@ -193,6 +193,7 @@
     <div class="tab" data-tab="impact">Вплив</div>
     <div class="tab" data-tab="strategy-paper">🤖 Auto Paper</div>
     <div class="tab" data-tab="consensus">🗳️ News Consensus</div>
+    <div class="tab" data-tab="replay">📼 Replay</div>
     <div class="tab" data-tab="paper">💰 Legacy Paper</div>
     <div class="tab" data-tab="calendar">📅 Календар</div>
     <div class="tab" data-tab="compare">⚖️ Порівняння</div>
@@ -204,6 +205,17 @@
   </div>
 
 
+
+<div id="tab-replay" style="display:none" class="space-y-4">
+  <div class="rounded-xl bg-slate-800 p-5 border border-slate-700">
+    <h2 class="text-xl font-bold text-cyan-400 mb-2">Historical Replay · News Consensus</h2>
+    <p class="text-sm text-amber-300 mb-3">Дослідницький історичний тест. Forecast та Actual окремо, BTC/ETH/SOL, 15 хв утримання, проста більшість. Actual може мати look-ahead bias: у базі немає історичних знімків часу появи факту. Live Paper рахунки не змінюються.</p>
+    <div class="flex gap-2 flex-wrap"><button onclick="ntReplayRun()" class="bg-cyan-700 hover:bg-cyan-600 rounded px-4 py-2">▶ Прогнати всю історію</button><button onclick="ntReplayLoad()" class="bg-slate-700 hover:bg-slate-600 rounded px-4 py-2">Останній результат</button></div>
+    <p id="nt-replay-status" class="mt-3 text-sm text-slate-300">Запусти Replay або завантаж останній результат.</p>
+  </div>
+  <div class="rounded-xl bg-slate-800 p-4 border border-slate-700 overflow-x-auto"><h3 class="font-semibold mb-3">Результати за режимом і монетою</h3><div id="nt-replay-stats"></div></div>
+  <div class="rounded-xl bg-slate-800 p-4 border border-slate-700 overflow-x-auto"><h3 class="font-semibold mb-3">Історичні угоди (до 500 останніх)</h3><div id="nt-replay-trades"></div></div>
+</div>
 
 <div id="tab-consensus" style="display:none" class="space-y-4">
  <div class="rounded-xl bg-slate-800 p-5 border border-slate-700">
@@ -1074,7 +1086,7 @@ async function loadStrategyPaper() {
 }
 
 // ===== TABS =====
-const ALL_TABS = ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','strategy-lab','strategy-paper','consensus','help'];
+const ALL_TABS = ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','strategy-lab','strategy-paper','consensus','replay','help'];
 document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
@@ -1088,6 +1100,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
     if (t.dataset.tab === 'paper') loadPaper();
     if (t.dataset.tab === 'strategy-paper') loadStrategyPaper();
     if (t.dataset.tab === 'consensus') nt3Load();
+    if (t.dataset.tab === 'replay') ntReplayLoad();
     if (t.dataset.tab === 'calendar') loadCalendar();
     if (t.dataset.tab === 'compare') loadCompare();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
@@ -2315,6 +2328,22 @@ async function runStrategyLab() {
 <script>
 function nt3Text(value){return String(value ?? '—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function nt3Table(headers, rows){if(!Array.isArray(rows)||!rows.length)return '<p class="text-slate-400">Записів немає</p>';return '<table class="w-full text-xs"><thead><tr>'+headers.map(h=>'<th class="p-2 text-left">'+nt3Text(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr class="border-t border-slate-700">'+headers.map(h=>'<td class="p-2">'+nt3Text(r[h])+'</td>').join('')+'</tr>').join('')+'</tbody></table>';}
+
+async function ntReplayLoad(){
+ const st=document.getElementById('nt-replay-status');
+ try{const r=await fetch('/api/v3/consensus/replay');if(!r.ok)throw Error('HTTP '+r.status);
+ const d=await r.json();if(!d.run){st.textContent='Історичних прогонів ще немає.';return;}
+ const sum=d.run.summary;st.textContent='Прогін #'+d.run.id+' · '+d.run.created_at+' · груп: '+sum.groups+' · угод: '+sum.trades+' · тільки дослідницькі результати';
+ const rows=Object.entries(sum.by_strategy||{}).map(([k,v])=>({strategy:k,...v}));
+ document.getElementById('nt-replay-stats').innerHTML=nt3Table(['strategy','trades','wins','losses','win_rate_pct','pnl_usd','ending_balance_usd','max_drawdown_pct'],rows);
+ document.getElementById('nt-replay-trades').innerHTML=d.trades.length?nt3Table(['mode','symbol','direction','votes_up','votes_down','entry_ts','exit_ts','pnl'],d.trades):'<p class="text-slate-400">Угод немає. Перевір пропуски в результатах API.</p>';
+ }catch(e){st.textContent='Помилка Replay: '+e.message;}
+}
+async function ntReplayRun(){
+ const st=document.getElementById('nt-replay-status');st.textContent='Обробка всієї історії...';
+ try{const r=await fetch('/api/v3/consensus/replay/run',{method:'POST'});if(!r.ok)throw Error('HTTP '+r.status+' '+await r.text());const d=await r.json();if(d.error)throw Error(d.error);await ntReplayLoad();}catch(e){st.textContent='Помилка запуску: '+e.message;}
+}
+
 async function nt3Load(){const status=document.getElementById('nt3-status');try{status.textContent='Завантаження...';const response=await fetch('/api/v3/consensus');if(!response.ok)throw new Error('HTTP '+response.status);const data=await response.json();document.getElementById('nt3-accounts').innerHTML=(data.accounts||[]).map(a=>'<div class="rounded-lg bg-slate-900 p-4"><div class="text-slate-400">'+nt3Text(a.mode)+'</div><div class="text-2xl font-bold">$'+nt3Text(a.balance)+'</div><div class="text-xs text-slate-400">Старт: $'+nt3Text(a.initial_balance)+'</div></div>').join('');document.getElementById('nt3-trades').innerHTML=((data.trades||[]).length ? nt3Table(['mode','symbol','direction','status','entry_ts','pnl'],data.trades||[]) : '<p class="text-slate-400 p-3">Поки немає Paper-угод. Натисни «Перевірити сигнали», щоб побачити причини пропусків. Нові угоди можливі лише для свіжих груп новин і актуальних хвилинних цін.</p>');document.getElementById('nt3-decisions').innerHTML=((data.decisions||[]).length ? nt3Table(['mode','group_key','symbol','votes_up','votes_down','reason'],data.decisions||[]) : '<p class="text-slate-400 p-3">Ще немає рішень. Бот обробляє групи новин лише протягом 30 хв після виходу; старі події не відкривають нових угод.</p>');status.textContent='Оновлено: '+new Date().toLocaleTimeString('uk-UA')+(data.health?' · '+JSON.stringify(data.health):'');}catch(e){status.textContent='Помилка Consensus API: '+e.message;}}
 async function nt3Run(){const status=document.getElementById('nt3-status');try{status.textContent='Перевірка сигналів...';const r=await fetch('/api/v3/consensus/run',{method:'POST'});if(!r.ok)throw new Error('HTTP '+r.status);const result=await r.json();await nt3Load();status.textContent='Результат перевірки: '+JSON.stringify(result);}catch(e){status.textContent='Помилка: '+e.message;}}
 async function nt3Backtest(){const output=document.getElementById('nt3-backtest');output.textContent='Виконується...';try{const mode=document.getElementById('nt3-mode').value,symbol=document.getElementById('nt3-symbol').value;const r=await fetch('/api/v3/consensus/backtest?mode='+encodeURIComponent(mode)+'&symbol='+encodeURIComponent(symbol));if(!r.ok)throw new Error('HTTP '+r.status);output.textContent=JSON.stringify(await r.json(),null,2);}catch(e){output.textContent='Помилка: '+e.message;}}

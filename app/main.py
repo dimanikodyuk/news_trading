@@ -1357,3 +1357,15 @@ async def api_consensus_backtest(mode: str = 'forecast', symbol: str = 'BTCUSDT'
     if mode not in news_consensus.MODES or symbol not in news_consensus.SYMBOLS or not 1 <= limit_groups <= 1000:
         raise HTTPException(status_code=422, detail='invalid mode, symbol or limit')
     return await news_consensus.research_backtest(mode, symbol, limit_groups)
+
+
+# Isolated historical replay: never touches consensus_accounts or consensus_trades.
+from app.strategy_lab import replay as consensus_replay
+
+@app.post('/api/v3/consensus/replay/run')
+async def api_consensus_replay_run():
+    return await consensus_replay.run()
+
+@app.get('/api/v3/consensus/replay')
+async def api_consensus_replay_latest():
+    return await consensus_replay.latest()
