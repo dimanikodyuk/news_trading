@@ -1,5 +1,5 @@
 """
-FastAPI-додаток: API для подій, цін, impact, LIVE, Paper Trading, Tools, Naive, LIVE TRADING.
+FastAPI-додаток: API для подій, цін, impact, LIVE, Paper Trading, Tools, LIVE TRADING.
 """
 
 import asyncio
@@ -36,12 +36,6 @@ from app.backtest.engine import (
     get_backtest_trades,
     get_backtest_equity_curve,
     clear_backtest,
-)
-from app.naive.engine import (
-    run_naive_test,
-    get_naive_trades,
-    get_naive_equity_curve,
-    clear_naive,
 )
 from app.live.executor import (
     process_live_engine,
@@ -283,6 +277,7 @@ async def live_broadcast_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await init_strategy_paper()
     await refresh_calendar(day="today")
 
     try:
@@ -296,8 +291,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(load_history_sync, "interval", hours=24, id="history_daily", kwargs={"days": 2, "interval": "1"})
     scheduler.add_job(recompute_impact_job, "interval", minutes=30, id="impact_recompute_auto")
     scheduler.add_job(paper_engine_job, "interval", minutes=1, id="paper_engine")
-    scheduler.add_job(live_engine_job, "interval", minutes=1, id="live_engine")
-    scheduler.add_job(live_closer_job, "interval", minutes=1, id="live_closer")
+    scheduler.add_job(strategy_paper_job, "interval", minutes=1, id="strategy_paper", max_instances=1)
+    # LIVE scheduler removed in paper-only release
+    # LIVE closer scheduler removed in paper-only release
     scheduler.add_job(check_upcoming_events, "interval", minutes=1, id="check_upcoming")
     scheduler.add_job(weekly_report_job, CronTrigger(day_of_week="sun", hour=20, minute=0), id="weekly_report")
     scheduler.start()
@@ -306,7 +302,7 @@ async def lifespan(app: FastAPI):
     start_ws_thread()
 
     asyncio.create_task(recompute_impact_job())
-    asyncio.create_task(live_broadcast_loop())
+    # LIVE broadcast loop disabled
 
     yield
     scheduler.shutdown()
@@ -415,6 +411,8 @@ async def api_live_toggle(enabled: bool = Body(..., embed=True)):
     if enabled:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="LIVE trading locked: dry-run only")
+    if enabled:
+        raise HTTPException(status_code=403, detail="LIVE execution disabled")
     return await toggle_live(False)
 
 
@@ -437,6 +435,7 @@ async def api_live_clear():
 
 @app.post("/live/run")
 async def api_live_run():
+    raise HTTPException(status_code=403, detail="LIVE execution disabled in paper-only release")
     stats = await process_live_engine()
     await manager.broadcast({"type": "live_updated", **stats})
     return stats
@@ -445,6 +444,7 @@ async def api_live_run():
 @app.post("/live/close_all")
 async def api_live_close_all():
     """Ручне закриття всіх FILLED позицій."""
+    raise HTTPException(status_code=403, detail="LIVE execution disabled in paper-only release")
     stats = await process_live_closer(manual=True)
     await manager.broadcast({"type": "live_closed", **stats})
     return stats
@@ -494,39 +494,6 @@ async def api_live_summary():
         "rejected": s["rejected"] or 0,
         "close_failed": s["close_failed"] or 0,
     }
-
-
-# ============================================================================
-# API: Naive
-# ============================================================================
-@app.post("/naive/run")
-async def api_naive_run(
-    days: int | None = Query(None, ge=1, le=3650),
-    reset: bool = True,
-    symbols: str = Query("SOLUSDT,BTCUSDT,ETHUSDT"),
-    size_usd: float = Query(10.0, ge=1, le=1000),
-    exit_offset_min: int = Query(60, ge=1, le=240),
-):
-    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    return await run_naive_test(
-        days=days, symbols=syms, size_usd=size_usd,
-        exit_offset_min=exit_offset_min, reset=reset,
-    )
-
-
-@app.get("/naive/trades")
-async def api_naive_trades(limit: int = 1000):
-    return await get_naive_trades(limit=limit)
-
-
-@app.get("/naive/equity_curve")
-async def api_naive_equity_curve():
-    return await get_naive_equity_curve()
-
-
-@app.post("/naive/clear")
-async def api_naive_clear():
-    return await clear_naive()
 
 
 # ============================================================================
@@ -1322,3 +1289,21 @@ async def v21_diagnostics():
 @app.get('/api/v2.1/clusters')
 async def v21_clusters(limit: int = Query(100, ge=1, le=1000)):
     return await clusters_v21(limit)
+
+# Strategy paper-only engine. No Bybit order API calls.
+from app.strategy_lab.paper import init_strategy_paper, run_strategy_paper, strategy_paper_summary
+
+async def strategy_paper_job():
+    try:
+        return await run_strategy_paper()
+    except Exception:
+        logger.exception("Strategy paper job failed")
+        return {"error": "strategy paper job failed"}
+
+@app.get('/api/v3/paper')
+async def v3_paper_summary():
+    return await strategy_paper_summary()
+
+@app.post('/api/v3/paper/run')
+async def v3_paper_run():
+    return await run_strategy_paper()

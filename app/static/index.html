@@ -187,23 +187,31 @@
 
 <main class="max-w-7xl mx-auto p-4">
   <div class="flex gap-2 mb-4 flex-wrap">
-    <div class="tab" data-tab="live"><span class="live-pulse"></span>LIVE</div>
+    
     <div class="tab active" data-tab="dashboard">Дашборд</div>
     <div class="tab" data-tab="events">Події</div>
     <div class="tab" data-tab="impact">Вплив</div>
-    <div class="tab" data-tab="paper">💰 Paper</div>
+    <div class="tab" data-tab="strategy-paper">🤖 Auto Paper</div>
+    <div class="tab" data-tab="paper">💰 Legacy Paper</div>
     <div class="tab" data-tab="calendar">📅 Календар</div>
     <div class="tab" data-tab="compare">⚖️ Порівняння</div>
     <div class="tab" data-tab="heatmap">Heatmap</div>
     <div class="tab" data-tab="tools">🔧 Інструменти</div>
     <div class="tab" data-tab="backtest">🧪 Backtest</div>
     <div class="tab" data-tab="strategy-lab">🧠 Strategy Lab v2</div>
-    <div class="tab" data-tab="naive">🎲 Тупо тест</div>
-    <div class="tab" data-tab="live-trading">🔴 LIVE TRADING</div>
     <div class="tab" data-tab="help">Довідка</div>
   </div>
 
 
+<div id="tab-strategy-paper" style="display:none" class="space-y-4">
+  <div class="rounded-xl bg-slate-800 p-5 border border-slate-700">
+    <h2 class="text-xl font-bold text-cyan-400 mb-2">🤖 Auto Paper · Forward Only</h2>
+    <p class="text-sm text-amber-300 mb-3">Momentum і Reversal — автоматичні симуляції тільки після новин на завершених свічках. News Surprise призупинено: час публікації Actual не підтверджено. Реальних ордерів немає.</p>
+    <button onclick="loadStrategyPaper()" class="px-4 py-2 bg-cyan-700 rounded">Оновити</button>
+    <div id="strategy-paper-accounts" class="mt-4 text-sm"></div>
+    <div class="overflow-x-auto mt-4"><table class="w-full text-sm"><thead><tr><th>Стратегія</th><th>Пара</th><th>Напрям</th><th>Статус</th><th>Розмір</th><th>P&L</th></tr></thead><tbody id="strategy-paper-trades"></tbody></table></div>
+  </div>
+</div>
   <div id="tab-strategy-lab" style="display:none" class="space-y-4">
     <div class="rounded-xl bg-slate-800 p-5 border border-slate-700">
       <h2 class="text-xl font-bold text-cyan-400 mb-2">🧠 Strategy Lab v2 — дослідження</h2>
@@ -649,113 +657,6 @@
     </div>
   </div>
 
-  <!-- ==================== NAIVE ==================== -->
-  <div id="tab-naive" style="display:none">
-    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-      <h1 class="text-2xl font-bold">🎲 "Тупо тест"</h1>
-      <div class="text-sm text-slate-500">
-        Угода на КОЖНУ high-подію.
-      </div>
-    </div>
-
-    <div class="card p-4 mb-4">
-      <h2 class="section-title">⚙ Параметри</h2>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div>
-          <label class="text-xs text-slate-400">Днів назад</label>
-          <input type="number" id="nv-days" placeholder="всі" min="1" max="3650"
-                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-        </div>
-        <div>
-          <label class="text-xs text-slate-400">Символи</label>
-          <input type="text" id="nv-symbols" value="SOLUSDT,BTCUSDT,ETHUSDT"
-                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-        </div>
-        <div>
-          <label class="text-xs text-slate-400">Розмір, $</label>
-          <input type="number" id="nv-size" value="10" min="1" max="1000" step="1"
-                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-        </div>
-        <div>
-          <label class="text-xs text-slate-400">Exit offset, хв</label>
-          <input type="number" id="nv-exit" value="60" min="1" max="240"
-                 class="w-full px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm">
-        </div>
-      </div>
-      <div class="flex gap-2 mt-4 flex-wrap">
-        <button onclick="runNaive()" id="nv-run-btn"
-                class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded text-sm font-semibold">
-          ▶ Запустити тест
-        </button>
-        <button onclick="clearNaive()"
-                class="px-4 py-2 bg-red-700 hover:bg-red-600 rounded text-sm">
-          🗑 Очистити
-        </button>
-      </div>
-      <div class="hint mt-2">
-        Фіксовані $10 / угоду. LONG + SHORT. Вхід T+1, вихід T+60. Голосування по expected_dir.
-        Рівність голосів = пропуск. Комісія 0.1% + slippage 0.05%.
-      </div>
-    </div>
-
-    <div class="card p-4 mb-4" id="nv-summary-card" style="display:none">
-      <h2 class="section-title">📊 Підсумок</h2>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="nv-summary"></div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4" id="nv-summary-2"></div>
-    </div>
-
-    <div class="card p-4 mb-4" id="nv-skips-card" style="display:none">
-      <h2 class="section-title">📈 Деталі прогону</h2>
-      <div id="nv-skips"></div>
-    </div>
-
-    <div class="card p-4 mb-4" id="nv-by-symbol-card" style="display:none">
-      <h2 class="section-title">📊 По символах</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Символ</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
-          <tbody id="nv-by-symbol-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card p-4 mb-4" id="nv-by-direction-card" style="display:none">
-      <h2 class="section-title">📊 По напрямках</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Напрямок</th><th class="text-right">Угод</th><th class="text-right">Wins</th><th class="text-right">Win Rate</th><th class="text-right">P&L</th></tr></thead>
-          <tbody id="nv-by-direction-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card p-4 mb-4" id="nv-equity-card" style="display:none">
-      <h2 class="section-title">📈 Equity curve</h2>
-      <canvas id="nv-equity-chart" height="80"></canvas>
-      <div class="hint mt-2" id="nv-equity-hint"></div>
-    </div>
-
-    <div class="card p-4" id="nv-trades-card" style="display:none">
-      <h2 class="section-title">📋 Угоди</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Час <span class="time-utc">(Київ / UTC)</span></th>
-            <th>Подія</th>
-            <th>Символ</th>
-            <th class="text-center">Напрямок</th>
-            <th class="text-center">Голоси</th>
-            <th class="text-right">Entry</th>
-            <th class="text-right">Exit</th>
-            <th class="text-right">P&L</th>
-            <th class="text-right">P&L %</th>
-          </tr></thead>
-          <tbody id="nv-trades-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
   <!-- ==================== LIVE TRADING ==================== -->
   <div id="tab-live-trading" style="display:none">
     <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
@@ -1133,8 +1034,32 @@ function fmtStatLast(tsStr) {
   return `${local} <span class="time-utc">(${utc} UTC)</span>`;
 }
 
+
+async function loadStrategyPaper() {
+ const el=document.getElementById('strategy-paper-accounts');
+ const tb=document.getElementById('strategy-paper-trades');
+ try {
+  const r=await fetch('/api/v3/paper'); if(!r.ok) throw new Error('HTTP '+r.status);
+  const d=await r.json();
+  el.replaceChildren(); tb.replaceChildren();
+  for(const a of d.accounts){
+   const p=document.createElement('p');
+   p.textContent=`${a.strategy}: $${Number(a.balance).toFixed(2)} / $${Number(a.initial_balance).toFixed(2)} · ${a.enabled?'ACTIVE':'PAUSED'}`;
+   el.appendChild(p);
+  }
+  if(!d.trades.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=6;td.textContent='Нових paper-угод поки немає — очікуємо події та сигнали.';tr.appendChild(td);tb.appendChild(tr);}
+  for(const t of d.trades){
+   const tr=document.createElement('tr');
+   for(const value of [t.strategy,t.symbol,t.direction,t.status,'$'+Number(t.size_usd).toFixed(2),t.pnl==null?'—':'$'+Number(t.pnl).toFixed(4)]){
+    const td=document.createElement('td');td.textContent=String(value);td.className='p-2 border-b border-slate-700';tr.appendChild(td);
+   }
+   tb.appendChild(tr);
+  }
+ } catch(e) {el.textContent='Помилка завантаження: '+e.message;}
+}
+
 // ===== TABS =====
-const ALL_TABS = ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','strategy-lab','naive','live-trading','help'];
+const ALL_TABS = ['live','dashboard','events','impact','paper','calendar','compare','heatmap','tools','backtest','strategy-lab','strategy-paper','help'];
 document.querySelectorAll('.tab[data-tab]').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
@@ -1146,14 +1071,13 @@ document.querySelectorAll('.tab[data-tab]').forEach(t => {
     if (t.dataset.tab === 'events') loadEvents();
     if (t.dataset.tab === 'impact') loadImpact();
     if (t.dataset.tab === 'paper') loadPaper();
+    if (t.dataset.tab === 'strategy-paper') loadStrategyPaper();
     if (t.dataset.tab === 'calendar') loadCalendar();
     if (t.dataset.tab === 'compare') loadCompare();
     if (t.dataset.tab === 'heatmap') { loadHeatmap(); loadCrossAsset(); }
     if (t.dataset.tab === 'live') { loadLive(); loadLiveRecent(); }
     if (t.dataset.tab === 'strategy-lab') { /* manual run, avoids expensive queries on navigation */ }
     if (t.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
-    if (t.dataset.tab === 'naive') { loadNaiveTrades(); loadNaiveEquity(); }
-    if (t.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); loadLiveSummary(); loadLiveEquity(); }
   };
 });
 
@@ -2166,116 +2090,6 @@ async function loadLiveEquity() {
   } catch (e) { console.error('loadLiveEquity failed', e); }
 }
 
-// ==================== NAIVE ====================
-let nvEquityChart = null;
-async function runNaive() {
-  const btn = document.getElementById('nv-run-btn');
-  const originalText = btn.innerHTML;
-  btn.innerHTML = '⏳...'; btn.disabled = true;
-  const params = new URLSearchParams();
-  const days = document.getElementById('nv-days').value.trim();
-  if (days) params.set('days', days);
-  params.set('reset', 'true');
-  params.set('symbols', document.getElementById('nv-symbols').value);
-  params.set('size_usd', document.getElementById('nv-size').value);
-  params.set('exit_offset_min', document.getElementById('nv-exit').value);
-  try {
-    const r = await api(`/naive/run?${params.toString()}`, { method: 'POST' });
-    renderNaiveResult(r);
-    await loadNaiveTrades();
-    await loadNaiveEquity();
-  } catch (e) { alert('Помилка: ' + e); }
-  finally { btn.innerHTML = originalText; btn.disabled = false; }
-}
-function renderNaiveResult(r) {
-  const s = r.summary || {};
-  document.getElementById('nv-summary-card').style.display = '';
-  document.getElementById('nv-summary').innerHTML = `
-    ${metric('Угод', s.n || 0, '', '')}
-    ${metric('Wins', s.wins || 0, 'up', '')}
-    ${metric('Losses', s.losses || 0, 'down', '')}
-    ${metric('Win Rate', (s.win_rate ?? 0).toFixed(1) + '%', (s.win_rate ?? 0) >= 50 ? 'up' : 'down', '')}
-  `;
-  document.getElementById('nv-summary-2').innerHTML = `
-    ${metric('Total P&L', fmtUsd(s.total_pnl), clsFor(s.total_pnl), '')}
-    ${metric('Avg P&L', fmtUsd(s.avg_pnl), clsFor(s.avg_pnl), '')}
-    ${metric('Старт $' + s.initial_balance.toFixed(0) + ' → Фінал', '$' + s.final_balance.toFixed(2), clsFor(s.total_pnl), '')}
-    ${metric('P&L %', (s.total_pnl_pct >= 0 ? '+' : '') + s.total_pnl_pct.toFixed(2) + '%', clsFor(s.total_pnl_pct), '')}
-  `;
-  const skips = r.skipped_reasons || {};
-  const skipsEntries = Object.entries(skips).sort((a, b) => b[1] - a[1]);
-  document.getElementById('nv-skips-card').style.display = '';
-  document.getElementById('nv-skips').innerHTML = `
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div>
-        <div class="text-sm font-semibold mb-2">Загальні цифри</div>
-        <div class="text-xs"><span class="text-slate-400">high-подій:</span> <span class="font-mono text-cyan-400">${r.high_events_total}</span></div>
-        <div class="text-xs"><span class="text-slate-400">груп (хвилин):</span> <span class="font-mono text-cyan-400">${r.groups_total}</span></div>
-        <div class="text-xs"><span class="text-slate-400">відкрито угод:</span> <span class="font-mono text-green-400">${r.opened}</span></div>
-      </div>
-      <div>
-        <div class="text-sm font-semibold mb-2">Причини skip</div>
-        ${skipsEntries.length > 0 ? skipsEntries.map(([reason, c]) => `<div class="text-xs"><span class="text-amber-400 font-mono">${reason}</span>: <span class="text-white">${c}</span></div>`).join('') : '<div class="text-xs text-slate-500">Немає</div>'}
-      </div>
-    </div>
-  `;
-  if (r.by_symbol && r.by_symbol.length > 0) {
-    document.getElementById('nv-by-symbol-card').style.display = '';
-    document.getElementById('nv-by-symbol-tbody').innerHTML = r.by_symbol.map(x => `
-      <tr><td>${symbolBadge(x.symbol)}</td><td class="text-right font-mono">${x.n}</td><td class="text-right font-mono up">${x.wins}</td><td class="text-right font-mono ${x.win_rate >= 50 ? 'up' : 'down'}">${x.win_rate.toFixed(1)}%</td><td class="text-right font-mono ${clsFor(x.total_pnl)}">${fmtUsd(x.total_pnl)}</td></tr>
-    `).join('');
-  } else { document.getElementById('nv-by-symbol-card').style.display = 'none'; }
-  if (r.by_direction && r.by_direction.length > 0) {
-    document.getElementById('nv-by-direction-card').style.display = '';
-    document.getElementById('nv-by-direction-tbody').innerHTML = r.by_direction.map(x => `
-      <tr><td>${dirBadge(x.direction)}</td><td class="text-right font-mono">${x.n}</td><td class="text-right font-mono up">${x.wins}</td><td class="text-right font-mono ${x.win_rate >= 50 ? 'up' : 'down'}">${x.win_rate.toFixed(1)}%</td><td class="text-right font-mono ${clsFor(x.total_pnl)}">${fmtUsd(x.total_pnl)}</td></tr>
-    `).join('');
-  } else { document.getElementById('nv-by-direction-card').style.display = 'none'; }
-}
-async function loadNaiveTrades() {
-  try {
-    const trades = await api('/naive/trades?limit=1000');
-    if (trades.length === 0) { document.getElementById('nv-trades-card').style.display = 'none'; return; }
-    document.getElementById('nv-trades-card').style.display = '';
-    document.getElementById('nv-trades-tbody').innerHTML = trades.map(t => {
-      const pnlSign = (t.pnl || 0) >= 0 ? '+' : '';
-      return `<tr>
-        <td class="font-mono text-xs">${fmtBothFull(t.event_time_utc)}</td>
-        <td class="text-cyan-400">${t.event_title}</td>
-        <td>${symbolBadge(t.symbol)}</td>
-        <td class="text-center">${dirBadge(t.direction)}</td>
-        <td class="text-center font-mono text-xs"><span class="up">${t.votes_up}</span>/<span class="down">${t.votes_down}</span></td>
-        <td class="text-right font-mono">${fmtUsd4(t.entry_price)}</td>
-        <td class="text-right font-mono">${fmtUsd4(t.exit_price)}</td>
-        <td class="text-right font-mono ${clsFor(t.pnl)}">${pnlSign}${fmtUsd(t.pnl)}</td>
-        <td class="text-right font-mono ${clsFor(t.pnl)}">${pnlSign}${(t.pnl_pct || 0).toFixed(3)}%</td>
-      </tr>`;
-    }).join('');
-  } catch (e) {}
-}
-async function loadNaiveEquity() {
-  try {
-    const curve = await api('/naive/equity_curve');
-    const card = document.getElementById('nv-equity-card');
-    if (curve.length === 0) { card.style.display = 'none'; return; }
-    card.style.display = '';
-    document.getElementById('nv-equity-hint').textContent = `${curve.length} угод, фінал: ${fmtUsd(curve[curve.length-1].cum_pnl)}`;
-    const labels = curve.map(p => { const d = new Date(p.ts); return d.toLocaleString('uk-UA', { timeZone: LOCAL_TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', ''); });
-    const data = curve.map(p => p.cum_pnl);
-    if (nvEquityChart) nvEquityChart.destroy();
-    nvEquityChart = new Chart(document.getElementById('nv-equity-chart'), {
-      type: 'line', data: { labels, datasets: [{ label: 'Cumulative P&L, $', data, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, tension: 0.2, pointRadius: 3, fill: true }] },
-      options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 8 }, grid: { color: '#334155' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'P&L, $', color: '#94a3b8' } } } }
-    });
-  } catch (e) {}
-}
-async function clearNaive() {
-  if (!confirm('Видалити всі naive-угоди?')) return;
-  await api('/naive/clear', { method: 'POST' });
-  ['nv-summary-card','nv-skips-card','nv-by-symbol-card','nv-by-direction-card','nv-equity-card','nv-trades-card'].forEach(id => document.getElementById(id).style.display = 'none');
-  if (nvEquityChart) { nvEquityChart.destroy(); nvEquityChart = null; }
-}
-
 // ==================== TOOLS ====================
 function showToolsResult(label, data) {
   const card = document.getElementById('tools-result-card');
@@ -2441,8 +2255,6 @@ setInterval(() => {
   if (active.dataset.tab === 'calendar') loadCalendar();
   if (active.dataset.tab === 'compare') loadCompare();
   if (active.dataset.tab === 'backtest') { loadBacktestTrades(); loadBacktestEquity(); }
-  if (active.dataset.tab === 'naive') { loadNaiveTrades(); loadNaiveEquity(); }
-  if (active.dataset.tab === 'live-trading') { loadLiveStatus(); loadLiveTrades(); loadLiveSummary(); loadLiveEquity(); }
 }, 30000);
 setInterval(() => {
   const active = document.querySelector('.tab.active');
