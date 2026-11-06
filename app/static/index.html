@@ -203,7 +203,22 @@
  <div class="rounded-xl bg-slate-800 border border-slate-700 p-5">
   <h2 class="text-xl font-bold text-cyan-400 mb-2">News Strategies · Breakout / Reversal</h2>
   <p class="text-sm text-slate-300">Нова логіка: новина → 3 хв реакції → підтверджений пробій або повернення в діапазон. Дослідження тільки на історичних свічках, без реальних ордерів.</p>
-  <p class="text-xs text-amber-300 mt-2">USD High · BTC/ETH/SOL · 1m · 15 хв утримання · $10 на угоду · комісія 0,1% та прослизання 0,05% на сторону. Не є валідованою стратегією.</p>
+  <p class="text-xs text-amber-300 mt-2">USD High · BTC/ETH/SOL · 1m. Вихід через заданий час, без SL/TP. Дослідницький режим, не валідована стратегія.</p>
+  <details class="mt-3 rounded-lg bg-slate-900 border border-slate-700 p-3" open><summary class="cursor-pointer font-semibold">⚙ Параметри News Breakout v2 Research</summary>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+  <label class="text-xs">Діапазон до новини (хв)<input id="nr-pre" type="number" min="14" max="60" value="15" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Реакція (хв)<input id="nr-reaction" type="number" min="1" max="10" value="3" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Вікно підтвердження (хв)<input id="nr-confirm" type="number" min="1" max="20" value="6" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Утримання (хв)<input id="nr-hold" type="number" min="1" max="120" value="15" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Мін. обсяг / середній<input id="nr-volume" type="number" min="0" max="10" step="0.1" value="0" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Сила пробою (ATR)<input id="nr-atr" type="number" min="0" max="5" step="0.1" value="0" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Розмір угоди ($)<input id="nr-size" type="number" min="0.01" max="10000" step="1" value="10" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Комісія за сторону (%)<input id="nr-fee" type="number" min="0" max="2" step="0.01" value="0.1" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs">Прослизання за сторону (%)<input id="nr-slip" type="number" min="0" max="2" step="0.01" value="0.05" class="w-full bg-slate-800 rounded p-2 mt-1"></label>
+  <label class="text-xs flex items-center gap-2"><input id="nr-reversal" type="checkbox" checked> Тестувати Reversal також</label>
+  </div>
+  <div class="mt-3 flex gap-2"><button onclick="newsResearchReset()" class="bg-slate-700 rounded px-3 py-2">Стандартні параметри</button></div>
+  <p class="text-xs text-slate-400 mt-2">0 для фільтрів обсягу та ATR = вимкнено. Порівнюй результати на відкладеній історії; підбір під ці самі події дає переоптимізацію.</p></details>
   <div class="flex flex-wrap gap-2 mt-4"><button onclick="newsResearchRun()" class="bg-cyan-700 hover:bg-cyan-600 rounded px-4 py-2">▶ Прогнати всю історію</button><button onclick="newsResearchLoad()" class="bg-slate-700 hover:bg-slate-600 rounded px-4 py-2">Останній результат</button></div>
   <p id="news-research-status" class="mt-3 text-sm text-slate-300">Натисни «Прогнати всю історію».</p>
  </div>
@@ -2344,15 +2359,24 @@ async function newsResearchLoad(){
  const status=document.getElementById('news-research-status');
  try{const r=await fetch('/api/v4/news/research');if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();
  if(!d.run){status.textContent='Прогонів ще немає. Натисни «Прогнати всю історію».';return;}
- const sum=d.run.summary;status.textContent='Прогін #'+d.run.id+' · подій: '+sum.events+' · угод: '+sum.trades+' · тільки Research';
+ const sum=d.run.summary;status.textContent='Прогін #'+d.run.id+' · подій: '+sum.events+' · угод: '+sum.trades+' · тільки Research · параметри: '+JSON.stringify(d.run.settings);
  document.getElementById('news-research-stats').innerHTML=nt3Table(['strategy','trades','wins','win_rate_pct','gross_pnl_usd','net_pnl_usd'],Object.entries(sum.by_strategy||{}).map(([strategy,v])=>({strategy,...v})));
  document.getElementById('news-research-skips').innerHTML=nt3Table(['reason','count'],Object.entries(sum.skipped||{}).map(([reason,count])=>({reason,count})));
  document.getElementById('news-research-trades').innerHTML=nt3Table(['event_title','symbol','strategy','direction','entry_ts','exit_ts','gross_pnl','net_pnl'],d.trades||[]);
  }catch(e){status.textContent='Помилка Research: '+e.message;}
 }
+function newsResearchReset(){
+ const defaults={'nr-pre':15,'nr-reaction':3,'nr-confirm':6,'nr-hold':15,'nr-volume':0,'nr-atr':0,'nr-size':10,'nr-fee':0.1,'nr-slip':0.05};
+ for(const [id,val] of Object.entries(defaults))document.getElementById(id).value=val;
+ document.getElementById('nr-reversal').checked=true;
+}
+function newsResearchParams(){
+ const n=id=>{const el=document.getElementById(id);const x=Number(el.value);if(!el.value.trim()||!Number.isFinite(x)||x<Number(el.min)||x>Number(el.max))throw Error('Некоректне значення: '+id);return x;};
+ return {pre_minutes:n('nr-pre'),reaction_minutes:n('nr-reaction'),confirmation_minutes:n('nr-confirm'),hold_minutes:n('nr-hold'),min_volume_ratio:n('nr-volume'),min_breakout_atr:n('nr-atr'),trade_size_usd:n('nr-size'),fee_per_side:n('nr-fee')/100,slippage_per_side:n('nr-slip')/100,enable_reversal:document.getElementById('nr-reversal').checked};
+}
 async function newsResearchRun(){
  const status=document.getElementById('news-research-status');status.textContent='Виконується дослідження всієї історії...';
- try{const r=await fetch('/api/v4/news/research/run',{method:'POST'});if(!r.ok)throw Error('HTTP '+r.status+' '+await r.text());const d=await r.json();if(d.error)throw Error(d.error);await newsResearchLoad();}
+ try{const params=newsResearchParams();const r=await fetch('/api/v4/news/research/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)});if(!r.ok)throw Error('HTTP '+r.status+' '+await r.text());const d=await r.json();if(d.error)throw Error(d.error);await newsResearchLoad();}
  catch(e){status.textContent='Помилка запуску: '+e.message;}
 }
 </script>

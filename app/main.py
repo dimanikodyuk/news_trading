@@ -1375,8 +1375,8 @@ async def api_consensus_replay_latest():
 from app.strategy_lab import news_research
 
 @app.post('/api/v4/news/research/run')
-async def api_news_research_run():
-    return await news_research.run()
+async def api_news_research_run(params: news_research.ResearchParams):
+    return await news_research.run(params)
 
 @app.get('/api/v4/news/research')
 async def api_news_research_latest():
