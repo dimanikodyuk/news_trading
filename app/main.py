@@ -30,6 +30,7 @@ from app.bot.notifier import (
     notify_weekly_report,
 )
 from app.paper.engine import process_paper_engine
+from app.strategy_lab import consensus as news_consensus
 from app.paper.stats import get_account, get_trades, get_equity_curve, reset_account
 from app.backtest.engine import (
     run_backtest,
@@ -278,7 +279,9 @@ async def live_broadcast_loop():
 async def lifespan(app: FastAPI):
     await init_db()
     await init_strategy_paper()
+    await news_consensus.init()
     await refresh_calendar(day="today")
+    await tools_load_calendar_week(week="this")
 
     try:
         await asyncio.to_thread(load_history_sync, 2, "1")
@@ -286,12 +289,14 @@ async def lifespan(app: FastAPI):
         logger.exception(f"Initial history load failed: {ex}")
 
     scheduler.add_job(refresh_calendar, "interval", minutes=15, id="calendar_frequent", kwargs={"day": "today"})
-    scheduler.add_job(refresh_calendar, "interval", hours=settings.calendar_refresh_hours, id="calendar_interval", kwargs={"day": "today"})
+    # Removed redundant calendar refresh interval; 15-minute refresh is sufficient.
     scheduler.add_job(refresh_calendar, CronTrigger(hour=0, minute=1), id="calendar_daily", kwargs={"day": "today"})
+    scheduler.add_job(tools_load_calendar_week, "interval", hours=6, id="calendar_weekly", kwargs={"week":"this"})
     scheduler.add_job(load_history_sync, "interval", hours=24, id="history_daily", kwargs={"days": 2, "interval": "1"})
     scheduler.add_job(recompute_impact_job, "interval", minutes=30, id="impact_recompute_auto")
-    scheduler.add_job(paper_engine_job, "interval", minutes=1, id="paper_engine")
-    scheduler.add_job(strategy_paper_job, "interval", minutes=1, id="strategy_paper", max_instances=1)
+    # Legacy paper job disabled; its historical tables remain read-only.
+    # Legacy strategy paper job disabled in favor of consensus paper.
+    scheduler.add_job(consensus_job, "interval", minutes=1, id="consensus_paper", max_instances=1)
     # LIVE scheduler removed in paper-only release
     # LIVE closer scheduler removed in paper-only release
     scheduler.add_job(check_upcoming_events, "interval", minutes=1, id="check_upcoming")
@@ -625,8 +630,8 @@ async def api_events_calendar(days: int = 7):
             SELECT id, title, country, importance, time_utc,
                    forecast_value, actual_value
             FROM events
-            WHERE time_utc BETWEEN ? AND ?
-            ORDER BY time_utc ASC
+            WHERE datetime(time_utc) BETWEEN datetime(?) AND datetime(?)
+            ORDER BY datetime(time_utc) ASC
         """, (from_iso, to_iso))
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
@@ -1307,3 +1312,35 @@ async def v3_paper_summary():
 @app.post('/api/v3/paper/run')
 async def v3_paper_run():
     return await run_strategy_paper()
+
+
+# News Consensus v3: isolated paper-only engine, no live exchange endpoints.
+async def consensus_job():
+    try:
+        result = await news_consensus.run()
+        if result.get('opened') or result.get('closed'):
+            await manager.broadcast({'type':'consensus_updated', **result})
+        return result
+    except Exception:
+        logger.exception('News consensus paper job failed')
+        return {'error':'consensus job failed'}
+
+@app.get('/api/v3/consensus')
+async def api_consensus_summary():
+    return await news_consensus.summary()
+
+@app.post('/api/v3/consensus/run')
+async def api_consensus_run():
+    return await consensus_job()
+
+@app.get('/api/v3/diagnostics')
+async def api_v3_diagnostics():
+    result = await news_consensus.summary()
+    return {'health':result['health'], 'recent_decisions':result['decisions'][:25],
+            'modes':result['accounts'], 'paper_only':True}
+
+@app.get('/api/v3/consensus/backtest')
+async def api_consensus_backtest(mode: str = 'forecast', symbol: str = 'BTCUSDT', limit_groups: int = 200):
+    if mode not in news_consensus.MODES or symbol not in news_consensus.SYMBOLS or not 1 <= limit_groups <= 1000:
+        raise HTTPException(status_code=422, detail='invalid mode, symbol or limit')
+    return await news_consensus.research_backtest(mode, symbol, limit_groups)
