@@ -282,6 +282,7 @@ async def lifespan(app: FastAPI):
     await news_consensus.init()
     await refresh_calendar(day="today")
     await tools_load_calendar_week(week="this")
+    await tools_load_calendar_week(week="next")
 
     try:
         await asyncio.to_thread(load_history_sync, 2, "1")
@@ -292,6 +293,7 @@ async def lifespan(app: FastAPI):
     # Removed redundant calendar refresh interval; 15-minute refresh is sufficient.
     scheduler.add_job(refresh_calendar, CronTrigger(hour=0, minute=1), id="calendar_daily", kwargs={"day": "today"})
     scheduler.add_job(tools_load_calendar_week, "interval", hours=6, id="calendar_weekly", kwargs={"week":"this"})
+    scheduler.add_job(tools_load_calendar_week, "interval", hours=6, id="calendar_next_week", kwargs={"week":"next"})
     scheduler.add_job(load_history_sync, "interval", hours=24, id="history_daily", kwargs={"days": 2, "interval": "1"})
     scheduler.add_job(recompute_impact_job, "interval", minutes=30, id="impact_recompute_auto")
     # Legacy paper job disabled; its historical tables remain read-only.
@@ -623,8 +625,11 @@ async def api_events(
 
 @app.get("/events/calendar")
 async def api_events_calendar(days: int = 7):
-    from_iso = datetime.now(timezone.utc).isoformat()
-    to_iso = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    # Include all of today (Kyiv), not only future events; show the full selected range.
+    from zoneinfo import ZoneInfo
+    now_kyiv = datetime.now(ZoneInfo("Europe/Kyiv"))
+    from_iso = now_kyiv.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
+    to_iso = (now_kyiv + timedelta(days=max(1, min(days, 31)))).astimezone(timezone.utc).isoformat()
     async with get_db() as db:
         cur = await db.execute("""
             SELECT id, title, country, importance, time_utc,
@@ -1064,6 +1069,14 @@ async def tools_load_calendar_week(week: str = "this"):
                       e["actual_value"]))
                 if cur.rowcount > 0:
                     inserted += 1
+                else:
+                    await db.execute("""UPDATE events SET
+                      forecast_value=COALESCE(?,forecast_value),
+                      previous_value=COALESCE(?,previous_value),
+                      actual_value=COALESCE(?,actual_value)
+                      WHERE provider=? AND title=? AND time_utc=?""",
+                      (e["forecast_value"], e["previous_value"], e["actual_value"],
+                       e["provider"], e["title"], e["time_utc"]))
             await db.commit()
         per_week[w] = {"fetched": len(events), "inserted": inserted}
         total_inserted += inserted
