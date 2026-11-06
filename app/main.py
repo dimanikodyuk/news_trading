@@ -298,7 +298,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(recompute_impact_job, "interval", minutes=30, id="impact_recompute_auto")
     # Legacy paper job disabled; its historical tables remain read-only.
     # Legacy strategy paper job disabled in favor of consensus paper.
-    scheduler.add_job(consensus_job, "interval", minutes=1, id="consensus_paper", max_instances=1)
+    # Old forecast/actual consensus scheduler retired; existing paper accounts remain unchanged.
     # LIVE scheduler removed in paper-only release
     # LIVE closer scheduler removed in paper-only release
     scheduler.add_job(check_upcoming_events, "interval", minutes=1, id="check_upcoming")
@@ -1369,3 +1369,15 @@ async def api_consensus_replay_run():
 @app.get('/api/v3/consensus/replay')
 async def api_consensus_replay_latest():
     return await consensus_replay.latest()
+
+
+# v4 read-only market-reaction research; no paper/live account writes.
+from app.strategy_lab import news_research
+
+@app.post('/api/v4/news/research/run')
+async def api_news_research_run():
+    return await news_research.run()
+
+@app.get('/api/v4/news/research')
+async def api_news_research_latest():
+    return await news_research.latest()
